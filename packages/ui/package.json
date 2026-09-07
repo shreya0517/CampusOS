@@ -1,0 +1,14 @@
+{
+  "name": "@campusos/ui",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "lint": "pnpm exec eslint src --max-warnings=0",
+    "typecheck": "pnpm exec tsc --project tsconfig.json --noEmit",
+    "test": "node -e \"console.log('No automated UI package tests defined yet.')\"",
+    "build": "pnpm exec tsc --project tsconfig.json"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1"
+  }
+}

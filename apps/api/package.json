@@ -1,0 +1,21 @@
+{
+  "name": "@campusos/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "node --watch src/main.ts",
+    "lint": "pnpm exec eslint . --max-warnings=0",
+    "typecheck": "pnpm exec tsc --project tsconfig.json --noEmit",
+    "test": "node -e \"console.log('No automated API tests defined yet.')\"",
+    "build": "pnpm exec tsc --project tsconfig.build.json"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.1.6",
+    "@nestjs/core": "^11.1.6",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1"
+  }
+}
