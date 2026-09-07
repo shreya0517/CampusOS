@@ -113,7 +113,7 @@ model College {
   updatedAt         DateTime           @updatedAt
   roles             Role[]
   userRoles         UserRole[]
-  users             User[]             // ← FIX 1: Add inverse relation
+  users             User[]
   students          Student[]
   faculties         Faculty[]
   departments       Department[]
@@ -146,13 +146,13 @@ model College {
 
 model User {
   id                    String         @id @default(cuid())
-  collegeId             String         // ← FIX 1: Add collegeId for tenant isolation
+  collegeId             String
   email                 String
   displayName           String
   status                UserStatus     @default(ACTIVE)
   createdAt             DateTime       @default(now())
   updatedAt             DateTime       @updatedAt
-  college               College        @relation(fields: [collegeId], references: [id], onDelete: Cascade) // ← FIX 1: Add relation
+  college               College        @relation(fields: [collegeId], references: [id], onDelete: Cascade)
   userRoles             UserRole[]
   studentProfiles       Student[]
   facultyProfiles       Faculty[]
@@ -161,8 +161,8 @@ model User {
   uploadedFiles         File[]         @relation("FileUploader")
   auditLogs             AuditLog[]     @relation("AuditActor")
 
-  @@unique([collegeId, email])  // ← FIX 2: Compound unique for tenant isolation
-  @@unique([collegeId, id])     // ← FIX 2: Enable compound FK references
+  @@unique([collegeId, email])
+  @@unique([collegeId, id])
   @@index([collegeId])
 }
 
@@ -555,7 +555,7 @@ model ExamSubject {
   examId     String
   subjectId  String
   semesterId String
-  sectionId  String?  // ← FIX 5: Keep nullable to allow college-wide exams
+  sectionId  String?
   examAt     DateTime
   maxMarks   Decimal  @db.Decimal(7, 2)
   passMarks  Decimal  @db.Decimal(7, 2)
@@ -566,10 +566,9 @@ model ExamSubject {
   subject    Subject  @relation(fields: [collegeId, subjectId], references: [collegeId, id], onDelete: Restrict)
   semester   Semester @relation(fields: [collegeId, semesterId], references: [collegeId, id], onDelete: Restrict)
   section    Section? @relation(fields: [collegeId, sectionId], references: [collegeId, id], onDelete: Restrict)
-  marks      Mark[]   // ← FIX 3: Add inverse relation
+  marks      Mark[]   @relation("marks")
 
   @@unique([collegeId, id])
-  // ← FIX 5: Remove compound unique on nullable field; use partial index in migration instead
   @@index([collegeId, semesterId, examAt])
 }
 
@@ -583,7 +582,7 @@ model Mark {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
   college       College     @relation(fields: [collegeId], references: [id], onDelete: Cascade)
-  examSubject   ExamSubject @relation(fields: [collegeId, examSubjectId], references: [collegeId, id], onDelete: Cascade) // ← FIX 3: Use compound FK
+  examSubject   ExamSubject @relation("marks", fields: [collegeId, examSubjectId], references: [collegeId, id], onDelete: Cascade)
   student       Student     @relation(fields: [collegeId, studentId], references: [collegeId, id], onDelete: Cascade)
 
   @@unique([collegeId, id])
@@ -703,7 +702,7 @@ model Announcement {
   createdAt   DateTime             @default(now())
   updatedAt   DateTime             @updatedAt
   college     College              @relation(fields: [collegeId], references: [id], onDelete: Cascade)
-  author      User                 @relation("AnnouncementAuthor", fields: [collegeId, authorId], references: [collegeId, id], onDelete: Restrict) // ← FIX 2: Compound FK with tenant isolation
+  author      User                 @relation("AnnouncementAuthor", fields: [collegeId, authorId], references: [collegeId, id], onDelete: Restrict)
 
   @@unique([collegeId, id])
   @@index([collegeId, audience, publishedAt])
@@ -722,7 +721,7 @@ model Notification {
   createdAt DateTime            @default(now())
   updatedAt DateTime            @updatedAt
   college   College             @relation(fields: [collegeId], references: [id], onDelete: Cascade)
-  user      User                @relation(fields: [collegeId, userId], references: [collegeId, id], onDelete: Cascade) // ← FIX 2: Compound FK with tenant isolation
+  user      User                @relation(fields: [collegeId, userId], references: [collegeId, id], onDelete: Cascade)
 
   @@unique([collegeId, id])
   @@index([collegeId, userId, status, createdAt])
@@ -739,7 +738,7 @@ model File {
   visibility   FileVisibility @default(PRIVATE)
   createdAt    DateTime       @default(now())
   college      College        @relation(fields: [collegeId], references: [id], onDelete: Cascade)
-  uploadedBy   User           @relation("FileUploader", fields: [collegeId, uploadedById], references: [collegeId, id], onDelete: Restrict) // ← FIX 2: Compound FK with tenant isolation
+  uploadedBy   User           @relation("FileUploader", fields: [collegeId, uploadedById], references: [collegeId, id], onDelete: Restrict)
 
   @@unique([collegeId, id])
   @@unique([collegeId, storageKey])
@@ -756,7 +755,7 @@ model AuditLog {
   metadata   Json?
   createdAt  DateTime @default(now())
   college    College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
-  actor      User?    @relation("AuditActor", fields: [collegeId, actorId], references: [collegeId, id], onDelete: SetNull) // ← FIX 4: Safe SetNull on compound FK (actorId is nullable)
+  actor      User?    @relation("AuditActor", fields: [collegeId, actorId], references: [collegeId, id], onDelete: Restrict)
 
   @@unique([collegeId, id])
   @@index([collegeId, entityType, entityId])
