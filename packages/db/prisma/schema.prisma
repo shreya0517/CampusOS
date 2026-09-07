@@ -1,0 +1,764 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  WITHDRAWN
+}
+
+enum ClassStatus {
+  SCHEDULED
+  CANCELLED
+  COMPLETED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+  LATE
+  GRADED
+  RETURNED
+}
+
+enum ExamStatus {
+  DRAFT
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+enum ResultStatus {
+  PENDING
+  PASSED
+  FAILED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  VOID
+  OVERDUE
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  UPI
+  ONLINE
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum AnnouncementAudience {
+  ALL
+  STUDENTS
+  FACULTY
+  STAFF
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  SMS
+  PUSH
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  READ
+  FAILED
+}
+
+enum FileVisibility {
+  PRIVATE
+  COLLEGE
+  PUBLIC
+}
+
+model College {
+  id                String             @id @default(cuid())
+  code              String             @unique
+  name              String
+  timezone          String             @default("Asia/Kolkata")
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  roles             Role[]
+  userRoles         UserRole[]
+  users             User[]             // ← FIX 1: Add inverse relation
+  students          Student[]
+  faculties         Faculty[]
+  departments       Department[]
+  courses           Course[]
+  semesters         Semester[]
+  sections          Section[]
+  enrollments       Enrollment[]
+  rooms             Room[]
+  classes           Class[]
+  timetables        Timetable[]
+  attendances       Attendance[]
+  attendanceRecords AttendanceRecord[]
+  assignments       Assignment[]
+  materials         Material[]
+  submissions       Submission[]
+  exams             Exam[]
+  examSubjects      ExamSubject[]
+  marks             Mark[]
+  results           Result[]
+  feeStructures     FeeStructure[]
+  invoices          Invoice[]
+  payments          Payment[]
+  receipts          Receipt[]
+  announcements     Announcement[]
+  notifications     Notification[]
+  files             File[]
+  auditLogs         AuditLog[]
+  subjects          Subject[]
+}
+
+model User {
+  id                    String         @id @default(cuid())
+  collegeId             String         // ← FIX 1: Add collegeId for tenant isolation
+  email                 String
+  displayName           String
+  status                UserStatus     @default(ACTIVE)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  college               College        @relation(fields: [collegeId], references: [id], onDelete: Cascade) // ← FIX 1: Add relation
+  userRoles             UserRole[]
+  studentProfiles       Student[]
+  facultyProfiles       Faculty[]
+  authoredAnnouncements Announcement[] @relation("AnnouncementAuthor")
+  notifications         Notification[]
+  uploadedFiles         File[]         @relation("FileUploader")
+  auditLogs             AuditLog[]     @relation("AuditActor")
+
+  @@unique([collegeId, email])  // ← FIX 2: Compound unique for tenant isolation
+  @@unique([collegeId, id])     // ← FIX 2: Enable compound FK references
+  @@index([collegeId])
+}
+
+model Role {
+  id              String           @id @default(cuid())
+  collegeId       String
+  name            String
+  description     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  college         College          @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, name])
+  @@index([collegeId])
+}
+
+model Permission {
+  id              String           @id @default(cuid())
+  code            String           @unique
+  description     String?
+  createdAt       DateTime         @default(now())
+  rolePermissions RolePermission[]
+}
+
+model UserRole {
+  id        String   @id @default(cuid())
+  collegeId String
+  userId    String
+  roleId    String
+  createdAt DateTime @default(now())
+  college   College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [collegeId, roleId], references: [collegeId, id], onDelete: Cascade)
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, userId, roleId])
+  @@index([userId])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  createdAt    DateTime   @default(now())
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model Department {
+  id        String    @id @default(cuid())
+  collegeId String
+  code      String
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  college   College   @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  courses   Course[]
+  subjects  Subject[]
+  faculty   Faculty[]
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, code])
+  @@index([collegeId, name])
+}
+
+model Course {
+  id            String         @id @default(cuid())
+  collegeId     String
+  departmentId  String
+  code          String
+  name          String
+  durationYears Int
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  college       College        @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  department    Department     @relation(fields: [collegeId, departmentId], references: [collegeId, id], onDelete: Restrict)
+  semesters     Semester[]
+  subjects      Subject[]
+  feeStructures FeeStructure[]
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, code])
+  @@index([collegeId, departmentId])
+}
+
+model Semester {
+  id            String         @id @default(cuid())
+  collegeId     String
+  courseId      String
+  number        Int
+  name          String
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  college       College        @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  course        Course         @relation(fields: [collegeId, courseId], references: [collegeId, id], onDelete: Cascade)
+  sections      Section[]
+  subjects      Subject[]
+  examSubjects  ExamSubject[]
+  feeStructures FeeStructure[]
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, courseId, number])
+  @@index([collegeId, courseId])
+}
+
+model Subject {
+  id           String        @id @default(cuid())
+  collegeId    String
+  departmentId String
+  courseId     String
+  semesterId   String
+  code         String
+  name         String
+  credits      Int
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  college      College       @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  department   Department    @relation(fields: [collegeId, departmentId], references: [collegeId, id], onDelete: Restrict)
+  course       Course        @relation(fields: [collegeId, courseId], references: [collegeId, id], onDelete: Restrict)
+  semester     Semester      @relation(fields: [collegeId, semesterId], references: [collegeId, id], onDelete: Restrict)
+  classes      Class[]
+  examSubjects ExamSubject[]
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, code])
+  @@index([collegeId, courseId, semesterId])
+}
+
+model Student {
+  id                String             @id @default(cuid())
+  collegeId         String
+  userId            String?
+  studentCode       String
+  firstName         String
+  lastName          String
+  dateOfBirth       DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  college           College            @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  user              User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  enrollments       Enrollment[]
+  attendanceRecords AttendanceRecord[]
+  submissions       Submission[]
+  marks             Mark[]
+  results           Result[]
+  invoices          Invoice[]
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, studentCode])
+  @@unique([collegeId, userId])
+  @@index([collegeId, lastName, firstName])
+}
+
+model Faculty {
+  id           String       @id @default(cuid())
+  collegeId    String
+  userId       String?
+  departmentId String?
+  employeeCode String
+  firstName    String
+  lastName     String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  college      College      @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  department   Department?  @relation(fields: [collegeId, departmentId], references: [collegeId, id], onDelete: Restrict)
+  classes      Class[]
+  assignments  Assignment[] @relation("AssignmentCreator")
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, employeeCode])
+  @@unique([collegeId, userId])
+  @@index([collegeId, departmentId])
+}
+
+model Section {
+  id           String        @id @default(cuid())
+  collegeId    String
+  semesterId   String
+  code         String
+  capacity     Int?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  college      College       @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  semester     Semester      @relation(fields: [collegeId, semesterId], references: [collegeId, id], onDelete: Cascade)
+  enrollments  Enrollment[]
+  classes      Class[]
+  examSubjects ExamSubject[]
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, semesterId, code])
+  @@index([collegeId, semesterId])
+}
+
+model Enrollment {
+  id         String           @id @default(cuid())
+  collegeId  String
+  studentId  String
+  sectionId  String
+  status     EnrollmentStatus @default(ACTIVE)
+  enrolledAt DateTime         @default(now())
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  college    College          @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  student    Student          @relation(fields: [collegeId, studentId], references: [collegeId, id], onDelete: Cascade)
+  section    Section          @relation(fields: [collegeId, sectionId], references: [collegeId, id], onDelete: Cascade)
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, studentId, sectionId])
+  @@index([collegeId, sectionId, status])
+}
+
+model Room {
+  id         String      @id @default(cuid())
+  collegeId  String
+  code       String
+  name       String
+  capacity   Int?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  college    College     @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  timetables Timetable[]
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, code])
+}
+
+model Class {
+  id          String       @id @default(cuid())
+  collegeId   String
+  sectionId   String
+  subjectId   String
+  facultyId   String?
+  status      ClassStatus  @default(SCHEDULED)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  section     Section      @relation(fields: [collegeId, sectionId], references: [collegeId, id], onDelete: Cascade)
+  subject     Subject      @relation(fields: [collegeId, subjectId], references: [collegeId, id], onDelete: Restrict)
+  faculty     Faculty?     @relation(fields: [collegeId, facultyId], references: [collegeId, id], onDelete: Restrict)
+  timetables  Timetable[]
+  attendances Attendance[]
+  assignments Assignment[]
+  materials   Material[]
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, sectionId, subjectId])
+  @@index([collegeId, facultyId])
+}
+
+model Timetable {
+  id        String   @id @default(cuid())
+  collegeId String
+  classId   String
+  roomId    String
+  dayOfWeek Int
+  startsAt  DateTime @db.Time(0)
+  endsAt    DateTime @db.Time(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  college   College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  class     Class    @relation(fields: [collegeId, classId], references: [collegeId, id], onDelete: Cascade)
+  room      Room     @relation(fields: [collegeId, roomId], references: [collegeId, id], onDelete: Restrict)
+
+  @@unique([collegeId, id])
+  @@index([collegeId, roomId, dayOfWeek])
+  @@index([collegeId, classId, dayOfWeek])
+}
+
+model Attendance {
+  id        String             @id @default(cuid())
+  collegeId String
+  classId   String
+  heldOn    DateTime           @db.Date
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  college   College            @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  class     Class              @relation(fields: [collegeId, classId], references: [collegeId, id], onDelete: Cascade)
+  records   AttendanceRecord[]
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, classId, heldOn])
+  @@index([collegeId, heldOn])
+}
+
+model AttendanceRecord {
+  id           String           @id @default(cuid())
+  collegeId    String
+  attendanceId String
+  studentId    String
+  status       AttendanceStatus
+  note         String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  college      College          @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  attendance   Attendance       @relation(fields: [collegeId, attendanceId], references: [collegeId, id], onDelete: Cascade)
+  student      Student          @relation(fields: [collegeId, studentId], references: [collegeId, id], onDelete: Cascade)
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, attendanceId, studentId])
+  @@index([collegeId, studentId, status])
+}
+
+model Assignment {
+  id          String       @id @default(cuid())
+  collegeId   String
+  classId     String
+  createdById String?
+  title       String
+  description String?
+  dueAt       DateTime?
+  maxMarks    Decimal      @db.Decimal(7, 2)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  class       Class        @relation(fields: [collegeId, classId], references: [collegeId, id], onDelete: Cascade)
+  createdBy   Faculty?     @relation("AssignmentCreator", fields: [collegeId, createdById], references: [collegeId, id], onDelete: Restrict)
+  materials   Material[]
+  submissions Submission[]
+
+  @@unique([collegeId, id])
+  @@index([collegeId, classId, dueAt])
+}
+
+model Material {
+  id           String      @id @default(cuid())
+  collegeId    String
+  classId      String
+  assignmentId String?
+  title        String
+  fileKey      String
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  college      College     @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  class        Class       @relation(fields: [collegeId, classId], references: [collegeId, id], onDelete: Cascade)
+  assignment   Assignment? @relation(fields: [collegeId, assignmentId], references: [collegeId, id], onDelete: Restrict)
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, fileKey])
+  @@index([collegeId, classId])
+}
+
+model Submission {
+  id           String           @id @default(cuid())
+  collegeId    String
+  assignmentId String
+  studentId    String
+  status       SubmissionStatus @default(DRAFT)
+  submittedAt  DateTime?
+  fileKey      String?
+  marksAwarded Decimal?         @db.Decimal(7, 2)
+  feedback     String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  college      College          @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  assignment   Assignment       @relation(fields: [collegeId, assignmentId], references: [collegeId, id], onDelete: Cascade)
+  student      Student          @relation(fields: [collegeId, studentId], references: [collegeId, id], onDelete: Cascade)
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, assignmentId, studentId])
+  @@index([collegeId, studentId, status])
+}
+
+model Exam {
+  id           String        @id @default(cuid())
+  collegeId    String
+  name         String
+  status       ExamStatus    @default(DRAFT)
+  startsOn     DateTime      @db.Date
+  endsOn       DateTime      @db.Date
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  college      College       @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  examSubjects ExamSubject[]
+  results      Result[]
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, name])
+  @@index([collegeId, status, startsOn])
+}
+
+model ExamSubject {
+  id         String   @id @default(cuid())
+  collegeId  String
+  examId     String
+  subjectId  String
+  semesterId String
+  sectionId  String?  // ← FIX 5: Keep nullable to allow college-wide exams
+  examAt     DateTime
+  maxMarks   Decimal  @db.Decimal(7, 2)
+  passMarks  Decimal  @db.Decimal(7, 2)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  college    College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  exam       Exam     @relation(fields: [collegeId, examId], references: [collegeId, id], onDelete: Cascade)
+  subject    Subject  @relation(fields: [collegeId, subjectId], references: [collegeId, id], onDelete: Restrict)
+  semester   Semester @relation(fields: [collegeId, semesterId], references: [collegeId, id], onDelete: Restrict)
+  section    Section? @relation(fields: [collegeId, sectionId], references: [collegeId, id], onDelete: Restrict)
+  marks      Mark[]   // ← FIX 3: Add inverse relation
+
+  @@unique([collegeId, id])
+  // ← FIX 5: Remove compound unique on nullable field; use partial index in migration instead
+  @@index([collegeId, semesterId, examAt])
+}
+
+model Mark {
+  id            String      @id @default(cuid())
+  collegeId     String
+  examSubjectId String
+  studentId     String
+  marksObtained Decimal?    @db.Decimal(7, 2)
+  isAbsent      Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  college       College     @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  examSubject   ExamSubject @relation(fields: [collegeId, examSubjectId], references: [collegeId, id], onDelete: Cascade) // ← FIX 3: Use compound FK
+  student       Student     @relation(fields: [collegeId, studentId], references: [collegeId, id], onDelete: Cascade)
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, examSubjectId, studentId])
+  @@index([collegeId, studentId])
+}
+
+model Result {
+  id          String       @id @default(cuid())
+  collegeId   String
+  examId      String
+  studentId   String
+  totalMarks  Decimal?     @db.Decimal(9, 2)
+  percentage  Decimal?     @db.Decimal(5, 2)
+  status      ResultStatus @default(PENDING)
+  publishedAt DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  college     College      @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  exam        Exam         @relation(fields: [collegeId, examId], references: [collegeId, id], onDelete: Cascade)
+  student     Student      @relation(fields: [collegeId, studentId], references: [collegeId, id], onDelete: Cascade)
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, examId, studentId])
+  @@index([collegeId, studentId, status])
+}
+
+model FeeStructure {
+  id          String    @id @default(cuid())
+  collegeId   String
+  courseId    String?
+  semesterId  String?
+  name        String
+  amount      Decimal   @db.Decimal(12, 2)
+  currency    String    @default("INR") @db.Char(3)
+  activeFrom  DateTime  @db.Date
+  activeUntil DateTime? @db.Date
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  college     College   @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  course      Course?   @relation(fields: [collegeId, courseId], references: [collegeId, id], onDelete: Restrict)
+  semester    Semester? @relation(fields: [collegeId, semesterId], references: [collegeId, id], onDelete: Restrict)
+  invoices    Invoice[]
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, name, activeFrom])
+  @@index([collegeId, courseId, semesterId])
+}
+
+model Invoice {
+  id             String        @id @default(cuid())
+  collegeId      String
+  studentId      String
+  feeStructureId String?
+  invoiceNumber  String
+  amountDue      Decimal       @db.Decimal(12, 2)
+  dueOn          DateTime?     @db.Date
+  status         InvoiceStatus @default(DRAFT)
+  issuedAt       DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  college        College       @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  student        Student       @relation(fields: [collegeId, studentId], references: [collegeId, id], onDelete: Restrict)
+  feeStructure   FeeStructure? @relation(fields: [collegeId, feeStructureId], references: [collegeId, id], onDelete: Restrict)
+  payments       Payment[]
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, invoiceNumber])
+  @@index([collegeId, studentId, status])
+  @@index([collegeId, dueOn])
+}
+
+model Payment {
+  id             String        @id @default(cuid())
+  collegeId      String
+  invoiceId      String
+  amount         Decimal       @db.Decimal(12, 2)
+  method         PaymentMethod
+  status         PaymentStatus @default(PENDING)
+  transactionRef String?
+  paidAt         DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  college        College       @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  invoice        Invoice       @relation(fields: [collegeId, invoiceId], references: [collegeId, id], onDelete: Cascade)
+  receipt        Receipt?
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, transactionRef])
+  @@index([collegeId, invoiceId, status])
+}
+
+model Receipt {
+  id            String   @id @default(cuid())
+  collegeId     String
+  paymentId     String
+  receiptNumber String
+  issuedAt      DateTime @default(now())
+  createdAt     DateTime @default(now())
+  college       College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  payment       Payment  @relation(fields: [collegeId, paymentId], references: [collegeId, id], onDelete: Cascade)
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, paymentId])
+  @@unique([collegeId, receiptNumber])
+}
+
+model Announcement {
+  id          String               @id @default(cuid())
+  collegeId   String
+  authorId    String
+  title       String
+  body        String
+  audience    AnnouncementAudience @default(ALL)
+  publishedAt DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  college     College              @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  author      User                 @relation("AnnouncementAuthor", fields: [collegeId, authorId], references: [collegeId, id], onDelete: Restrict) // ← FIX 2: Compound FK with tenant isolation
+
+  @@unique([collegeId, id])
+  @@index([collegeId, audience, publishedAt])
+}
+
+model Notification {
+  id        String              @id @default(cuid())
+  collegeId String
+  userId    String
+  channel   NotificationChannel @default(IN_APP)
+  status    NotificationStatus  @default(PENDING)
+  title     String
+  body      String
+  readAt    DateTime?
+  sentAt    DateTime?
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  college   College             @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  user      User                @relation(fields: [collegeId, userId], references: [collegeId, id], onDelete: Cascade) // ← FIX 2: Compound FK with tenant isolation
+
+  @@unique([collegeId, id])
+  @@index([collegeId, userId, status, createdAt])
+}
+
+model File {
+  id           String         @id @default(cuid())
+  collegeId    String
+  uploadedById String
+  storageKey   String
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  visibility   FileVisibility @default(PRIVATE)
+  createdAt    DateTime       @default(now())
+  college      College        @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  uploadedBy   User           @relation("FileUploader", fields: [collegeId, uploadedById], references: [collegeId, id], onDelete: Restrict) // ← FIX 2: Compound FK with tenant isolation
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, storageKey])
+  @@index([collegeId, uploadedById, createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  collegeId  String
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  college    College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  actor      User?    @relation("AuditActor", fields: [collegeId, actorId], references: [collegeId, id], onDelete: SetNull) // ← FIX 4: Safe SetNull on compound FK (actorId is nullable)
+
+  @@unique([collegeId, id])
+  @@index([collegeId, entityType, entityId])
+  @@index([collegeId, createdAt])
+}
