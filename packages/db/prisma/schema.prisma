@@ -105,65 +105,119 @@ enum FileVisibility {
 }
 
 model College {
-  id                String             @id @default(cuid())
-  code              String             @unique
-  name              String
-  timezone          String             @default("Asia/Kolkata")
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  roles             Role[]
-  userRoles         UserRole[]
-  users             User[]
-  students          Student[]
-  faculties         Faculty[]
-  departments       Department[]
-  courses           Course[]
-  semesters         Semester[]
-  sections          Section[]
-  enrollments       Enrollment[]
-  rooms             Room[]
-  classes           Class[]
-  timetables        Timetable[]
-  attendances       Attendance[]
-  attendanceRecords AttendanceRecord[]
-  assignments       Assignment[]
-  materials         Material[]
-  submissions       Submission[]
-  exams             Exam[]
-  examSubjects      ExamSubject[]
-  marks             Mark[]
-  results           Result[]
-  feeStructures     FeeStructure[]
-  invoices          Invoice[]
-  payments          Payment[]
-  receipts          Receipt[]
-  announcements     Announcement[]
-  notifications     Notification[]
-  files             File[]
-  auditLogs         AuditLog[]
-  subjects          Subject[]
+  id                      String                   @id @default(cuid())
+  code                    String                   @unique
+  name                    String
+  timezone                String                   @default("Asia/Kolkata")
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  roles                   Role[]
+  userRoles               UserRole[]
+  users                   User[]
+  students                Student[]
+  faculties               Faculty[]
+  departments             Department[]
+  courses                 Course[]
+  semesters               Semester[]
+  sections                Section[]
+  enrollments             Enrollment[]
+  rooms                   Room[]
+  classes                 Class[]
+  timetables              Timetable[]
+  attendances             Attendance[]
+  attendanceRecords       AttendanceRecord[]
+  assignments             Assignment[]
+  materials               Material[]
+  submissions             Submission[]
+  exams                   Exam[]
+  examSubjects            ExamSubject[]
+  marks                   Mark[]
+  results                 Result[]
+  feeStructures           FeeStructure[]
+  invoices                Invoice[]
+  payments                Payment[]
+  receipts                Receipt[]
+  announcements           Announcement[]
+  notifications           Notification[]
+  files                   File[]
+  auditLogs               AuditLog[]
+  subjects                Subject[]
+  sessions                AuthSession[]
+  emailVerificationTokens EmailVerificationToken[]
+  passwordResetTokens     PasswordResetToken[]
 }
 
 model User {
-  id                    String         @id @default(cuid())
-  collegeId             String
-  email                 String
-  displayName           String
-  status                UserStatus     @default(ACTIVE)
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
-  college               College        @relation(fields: [collegeId], references: [id], onDelete: Cascade)
-  userRoles             UserRole[]
-  studentProfiles       Student[]
-  facultyProfiles       Faculty[]
-  authoredAnnouncements Announcement[] @relation("AnnouncementAuthor")
-  notifications         Notification[]
-  uploadedFiles         File[]         @relation("FileUploader")
-  auditLogs             AuditLog[]     @relation("AuditActor")
+  id                      String                   @id @default(cuid())
+  collegeId               String
+  email                   String
+  passwordHash            String?
+  emailVerifiedAt         DateTime?
+  displayName             String
+  status                  UserStatus               @default(ACTIVE)
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  college                 College                  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  userRoles               UserRole[]
+  studentProfiles         Student[]
+  facultyProfiles         Faculty[]
+  authoredAnnouncements   Announcement[]           @relation("AnnouncementAuthor")
+  notifications           Notification[]
+  uploadedFiles           File[]                   @relation("FileUploader")
+  auditLogs               AuditLog[]               @relation("AuditActor")
+  sessions                AuthSession[]
+  emailVerificationTokens EmailVerificationToken[]
+  passwordResetTokens     PasswordResetToken[]
 
   @@unique([collegeId, email])
   @@unique([collegeId, id])
   @@index([collegeId])
+}
+
+model AuthSession {
+  id               String    @id @default(cuid())
+  collegeId        String
+  userId           String
+  refreshTokenHash String    @unique
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  college          College   @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  user             User      @relation(fields: [collegeId, userId], references: [collegeId, id], onDelete: Cascade)
+
+  @@unique([collegeId, id])
+  @@index([collegeId, userId, expiresAt])
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  collegeId String
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  college   College   @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [collegeId, userId], references: [collegeId, id], onDelete: Cascade)
+
+  @@unique([collegeId, id])
+  @@index([collegeId, userId, expiresAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  collegeId String
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  college   College   @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [collegeId, userId], references: [collegeId, id], onDelete: Cascade)
+
+  @@unique([collegeId, id])
+  @@index([collegeId, userId, expiresAt])
 }
 
 model Role {
@@ -197,7 +251,7 @@ model UserRole {
   roleId    String
   createdAt DateTime @default(now())
   college   College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [collegeId, userId], references: [collegeId, id], onDelete: Cascade)
   role      Role     @relation(fields: [collegeId, roleId], references: [collegeId, id], onDelete: Cascade)
 
   @@unique([collegeId, id])
@@ -307,7 +361,7 @@ model Student {
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   college           College            @relation(fields: [collegeId], references: [id], onDelete: Cascade)
-  user              User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user              User?              @relation(fields: [collegeId, userId], references: [collegeId, id], onDelete: Restrict)
   enrollments       Enrollment[]
   attendanceRecords AttendanceRecord[]
   submissions       Submission[]
@@ -332,7 +386,7 @@ model Faculty {
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   college      College      @relation(fields: [collegeId], references: [id], onDelete: Cascade)
-  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user         User?        @relation(fields: [collegeId, userId], references: [collegeId, id], onDelete: Restrict)
   department   Department?  @relation(fields: [collegeId, departmentId], references: [collegeId, id], onDelete: Restrict)
   classes      Class[]
   assignments  Assignment[] @relation("AssignmentCreator")

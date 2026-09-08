@@ -40,4 +40,4 @@
 
 ## Current Phase
 
-The current repository state is intentionally limited to scaffolding, shared conventions, and placeholder applications. Feature implementation is deferred to future phases.
+Phase 02 adds a NestJS authentication module with college-scoped accounts, short-lived access tokens, rotating refresh sessions, and email-verification/password-reset token structures. UI workflows, RBAC, background jobs, and email delivery remain deferred.

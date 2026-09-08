@@ -19,6 +19,18 @@
 - Migrations must be generated through Prisma and committed to version control.
 - Environment-specific credentials belong in environment variables only.
 
+## Phase 01 Schema Decisions
+
+- `College` is the tenant boundary. Every tenant-owned model stores `collegeId` and has a compound `(collegeId, id)` key.
+- Tenant-to-tenant relations use compound foreign keys containing `collegeId`, so PostgreSQL rejects relations that link records across colleges.
+- `User` is college-scoped. Every user relation includes `collegeId`, which prevents a profile, notification, file, announcement, or audit record from referring to a user in another college.
+- `Permission` is a global catalog; `Role` is college-scoped.
+- `Class` represents a section's delivery of a subject, `Timetable` its recurring slots, and `Attendance` a delivered class date.
+- `ExamSubject` allows a college-wide exam subject without a section. Its migration adds a PostgreSQL expression index so only one row exists per college, exam, subject, and optional section scope.
+- Finance values use fixed-point PostgreSQL decimals. Invoice and receipt numbers are unique per college.
+- `File` stores only object metadata. Object bytes remain in S3-compatible storage, with `storageKey` unique per college.
+- The schema protects tenant-owned foreign-key relations. API code must still scope every query by authenticated college context.
+
 ## Migration Rules
 
 1. Update the Prisma schema first.

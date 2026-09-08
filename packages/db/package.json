@@ -9,12 +9,21 @@
     "build": "pnpm exec tsc --project tsconfig.json",
     "prisma:format": "pnpm exec prisma format",
     "prisma:generate": "pnpm exec prisma generate",
-    "prisma:migrate:dev": "pnpm exec prisma migrate dev"
+    "prisma:migrate:dev": "pnpm exec prisma migrate dev",
+    "prisma:migrate:deploy": "pnpm exec prisma migrate deploy",
+    "prisma:migrate:status": "pnpm exec prisma migrate status",
+    "prisma:seed": "pnpm exec prisma db seed",
+    "prisma:validate": "pnpm exec prisma validate"
   },
-  "devDependencies": {
-    "prisma": "^6.15.0"
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
-    "@prisma/client": "6.19.3"
+    "@prisma/client": "^6.15.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "prisma": "^6.15.0",
+    "tsx": "^4.20.5"
   }
 }
