@@ -40,4 +40,4 @@
 
 ## Current Phase
 
-Phase 02 adds a NestJS authentication module with college-scoped accounts, short-lived access tokens, rotating refresh sessions, and email-verification/password-reset token structures. UI workflows, RBAC, background jobs, and email delivery remain deferred.
+Phase 03 adds centralized authorization after authentication. Server-side role, permission, college, and faculty-department context is loaded from the database. Tenant-scoped access requires the authenticated college; HOD access also requires the authenticated department. SUPER_ADMIN cross-tenant operations require explicit role and permission declarations. Business modules remain deferred.

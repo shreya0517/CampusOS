@@ -75,6 +75,10 @@ Successful login returns `{ "accessToken": "...", "user": { ... } }` and sets th
 
 Set `AUTH_ACCESS_TOKEN_SECRET` to a random value of at least 32 characters before starting the API. The local API development command loads the root `.env` file.
 
+## Authorization
+
+Authorization runs after access-token authentication. The API derives role, permission, college, and department context from server-side records; request-supplied tenant, role, and department values never grant access. Reusable guards return `403 FORBIDDEN` for insufficient role, permission, tenant, or department scope. Phase 03 exposes only isolated authorization probes under `/api/v1/authorization/probes` to validate this infrastructure; they are not business APIs.
+
 ## Testing Expectations
 
 - Unit test service logic with Jest

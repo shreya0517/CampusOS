@@ -65,6 +65,9 @@ CampusOS is a multi-tenant college management SaaS platform. The repository foun
 4. Sanitize logs to avoid exposing PII, tokens, or tenant-sensitive metadata.
 5. Enforce authorization checks server-side even if the frontend hides actions.
 6. Review third-party dependencies before adoption and keep the dependency surface minimal.
+7. Tenant context must originate from the authenticated server-side identity; client-supplied tenant, role, and department values are never authorization proof.
+8. Tenant-owned queries must be scoped by the authenticated college, and HOD operations must also enforce the authenticated department.
+9. Authorization occurs after authentication through centralized role and permission guards; SUPER_ADMIN cross-tenant access must be explicitly declared and tested.
 
 ## Database Migration Rules
 
