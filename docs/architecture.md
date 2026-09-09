@@ -43,3 +43,5 @@
 Phase 03 adds centralized authorization after authentication. Server-side role, permission, college, and faculty-department context is loaded from the database. Tenant-scoped access requires the authenticated college; HOD access also requires the authenticated department. SUPER_ADMIN cross-tenant operations require explicit role and permission declarations. Business modules remain deferred.
 
 Phase 04 establishes the Next.js frontend foundation in `apps/web`: semantic light/dark tokens, reusable UI primitives, responsive shell navigation, and isolated UI demonstrations. The frontend does not make authorization decisions; backend authorization remains authoritative.
+
+Phase 05 adds a tenant-scoped Students module. Academic placement is modeled through the existing Student -> Enrollment -> Section -> Semester -> Course -> Department chain; the API scopes all student and section lookups to the authenticated college, and HOD/FACULTY queries to their server-derived department.

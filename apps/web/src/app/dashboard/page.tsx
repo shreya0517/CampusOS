@@ -1,0 +1,4 @@
+import Link from 'next/link';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+
+export default function DashboardPage() { return <div className="grid gap-6"><div><p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">CampusOS</p><h1 className="mt-2 text-3xl font-semibold">Dashboard</h1><p className="mt-2 max-w-2xl text-[hsl(var(--muted-foreground))]">Start from the available workspace modules. Additional modules will appear as their phases are delivered.</p></div><Card><CardHeader><CardTitle>Student management</CardTitle><CardDescription>Search student records, review profiles, and manage enrollment information.</CardDescription></CardHeader><CardContent><Link className="font-semibold text-[hsl(var(--primary))] underline underline-offset-4" href="/dashboard/students">Open students</Link></CardContent></Card></div>; }

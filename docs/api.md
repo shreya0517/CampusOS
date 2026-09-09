@@ -84,3 +84,16 @@ Authorization runs after access-token authentication. The API derives role, perm
 - Unit test service logic with Jest
 - Validate HTTP behavior with Supertest
 - Cover critical user journeys end-to-end with Playwright once frontend flows exist
+
+## Students (Phase 05)
+
+All student endpoints require a bearer access token and derive tenant, role, and department from that authenticated identity. Client-supplied tenant and role values are ignored.
+
+- POST /api/v1/students: ADMIN/HOD creates a student and initial section enrollment. Body: { studentCode, firstName, lastName, dateOfBirth?, sectionId }.
+- GET /api/v1/students: ADMIN/HOD/FACULTY list scoped students. Supports search, departmentId, courseId, semesterId, sectionId, page, and pageSize.
+- GET /api/v1/students/me: STUDENT retrieves only its linked profile.
+- GET /api/v1/students/:id: scoped profile read. STUDENT can only read their own profile.
+- PUT /api/v1/students/:id: ADMIN/HOD update profile fields.
+- POST /api/v1/students/:id/enrollments: ADMIN/HOD add or update a section enrollment. Body: { sectionId, status? }.
+
+HOD and FACULTY access is restricted to students whose enrolled section belongs to their authenticated faculty department. Association requests validate that the section belongs to the authenticated college and department; cross-college and cross-department IDs return 403 FORBIDDEN without resource details.
