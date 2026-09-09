@@ -1,0 +1,3 @@
+import type { ReactNode } from 'react';
+
+export default function AuthLayout({ children }: { children: ReactNode }) { return <main className="grid min-h-screen place-items-center bg-[hsl(var(--background))] p-4"><section className="w-full max-w-md rounded-[var(--radius)] border bg-[hsl(var(--card))] p-6 shadow-sm sm:p-8"><p className="text-sm font-semibold uppercase tracking-[.18em] text-[hsl(var(--primary))]">CampusOS</p><div className="mt-8">{children}</div></section></main>; }

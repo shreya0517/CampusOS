@@ -1,18 +1,3 @@
-export default function HomePage() {
-  return (
-    <main className="flex min-h-screen items-center justify-center p-8">
-      <section className="max-w-2xl rounded-2xl border border-slate-200 bg-white p-10 shadow-sm">
-        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
-          CampusOS
-        </p>
-        <h1 className="mt-4 text-4xl font-bold text-slate-900">
-          Repository foundation ready for product development
-        </h1>
-        <p className="mt-4 text-base leading-7 text-slate-600">
-          This placeholder page exists only to verify the frontend build pipeline. Business
-          features will be added in later phases.
-        </p>
-      </section>
-    </main>
-  );
-}
+import { AppShell } from '@/components/layout/app-shell';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+export default function HomePage() { return <AppShell><div className="grid gap-6"><div><p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">CampusOS</p><h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">A calm foundation for complex campus work.</h1><p className="mt-3 max-w-2xl text-[hsl(var(--muted-foreground))]">Reusable layout, accessible controls, and semantic tokens are ready for future product modules.</p></div><Card><CardHeader><CardTitle>Foundation preview</CardTitle><CardDescription>This route demonstrates shared UI only. It contains no business data or authorization decisions.</CardDescription></CardHeader><CardContent><a className="font-semibold text-[hsl(var(--primary))] underline underline-offset-4" href="/foundation">Open component foundation</a></CardContent></Card></div></AppShell>; }
