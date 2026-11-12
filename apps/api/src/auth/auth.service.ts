@@ -8,7 +8,7 @@ import type { ForgotPasswordDto, LoginDto, RegisterDto, ResetPasswordDto } from 
 const scrypt = promisify(scryptCallback);
 const genericCredentialsError = new UnauthorizedException({ code: 'INVALID_CREDENTIALS', message: 'Invalid credentials.' });
 
-export type PublicUser = { id: string; collegeId: string; email: string; displayName: string; emailVerified: boolean };
+export type PublicUser = { id: string; collegeId: string; email: string; displayName: string; emailVerified: boolean; roles: string[] };
 type SessionResult = { accessToken: string; refreshToken: string; user: PublicUser };
 
 @Injectable()
@@ -32,14 +32,20 @@ export class AuthService {
     if (!isNonEmpty(input.collegeCode) || !isEmail(input.email) || !isNonEmpty(input.password)) throw genericCredentialsError;
     const college = await this.database.college.findUnique({ where: { code: input.collegeCode.trim() } });
     if (!college) throw genericCredentialsError;
-    const user = await this.database.user.findUnique({ where: { collegeId_email: { collegeId: college.id, email: input.email.trim().toLowerCase() } } });
+    const user = await this.database.user.findUnique({
+      where: { collegeId_email: { collegeId: college.id, email: input.email.trim().toLowerCase() } },
+      include: { userRoles: { include: { role: true } }, studentProfiles: true, facultyProfiles: true },
+    });
     if (!user || user.status !== 'ACTIVE' || !user.passwordHash || !user.emailVerifiedAt || !(await verifyPassword(input.password, user.passwordHash))) throw genericCredentialsError;
     return this.createSession(user);
   }
 
   async refresh(rawToken: string | undefined): Promise<SessionResult> {
     if (!rawToken) throw new UnauthorizedException({ code: 'SESSION_EXPIRED', message: 'Session expired.' });
-    const session = await this.database.authSession.findUnique({ where: { refreshTokenHash: hashToken(rawToken) }, include: { user: true } });
+    const session = await this.database.authSession.findUnique({
+      where: { refreshTokenHash: hashToken(rawToken) },
+      include: { user: { include: { userRoles: { include: { role: true } }, studentProfiles: true, facultyProfiles: true } } },
+    });
     if (!session || session.revokedAt || session.expiresAt <= new Date() || session.user.status !== 'ACTIVE' || !session.user.emailVerifiedAt) throw new UnauthorizedException({ code: 'SESSION_EXPIRED', message: 'Session expired.' });
     const refreshToken = randomToken();
     const rotation = await this.database.authSession.updateMany({
@@ -112,7 +118,7 @@ export class AuthService {
     }
   }
 
-  private async createSession(user: { id: string; collegeId: string; email: string; displayName: string; emailVerifiedAt: Date | null }): Promise<SessionResult> {
+  private async createSession(user: { id: string; collegeId: string; email: string; displayName: string; emailVerifiedAt: Date | null; userRoles?: Array<{ role: { name: string } }>; studentProfiles?: Array<{ id: string }>; facultyProfiles?: Array<{ id: string }> }): Promise<SessionResult> {
     const refreshToken = randomToken();
     const session = await this.database.authSession.create({ data: { collegeId: user.collegeId, userId: user.id, refreshTokenHash: hashToken(refreshToken), expiresAt: new Date(Date.now() + getAuthConfig().refreshTokenTtlDays * 86_400_000) } });
     return { accessToken: this.createAccessToken(user.id, user.collegeId, session.id), refreshToken, user: toPublicUser(user) };
@@ -125,7 +131,14 @@ export class AuthService {
   private async createVerificationToken(collegeId: string, userId: string): Promise<string> { const token = randomToken(); await this.database.emailVerificationToken.create({ data: { collegeId, userId, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + 86_400_000) } }); return token; }
   private async createPasswordResetToken(collegeId: string, userId: string): Promise<string> { const token = randomToken(); await this.database.passwordResetToken.create({ data: { collegeId, userId, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + 3_600_000) } }); return token; }
   private validateRegistration(input: RegisterDto): void { if (!isNonEmpty(input.collegeCode) || !isEmail(input.email) || !isStrongPassword(input.password) || input.displayName.trim().length < 2) throw new BadRequestException({ code: 'INVALID_INPUT', message: 'Registration details are invalid.' }); }
-  private async authorizeAccessPayload(payload: AccessPayload): Promise<PublicUser> { const session = await this.database.authSession.findUnique({ where: { id: payload.sid }, include: { user: true } }); if (!session || session.collegeId !== payload.collegeId || session.userId !== payload.sub || session.revokedAt || session.expiresAt <= new Date() || session.user.status !== 'ACTIVE' || !session.user.emailVerifiedAt) throw new UnauthorizedException({ code: 'SESSION_EXPIRED', message: 'Session expired.' }); return toPublicUser(session.user); }
+  private async authorizeAccessPayload(payload: AccessPayload): Promise<PublicUser> {
+    const session = await this.database.authSession.findUnique({
+      where: { id: payload.sid },
+      include: { user: { include: { userRoles: { include: { role: true } }, studentProfiles: true, facultyProfiles: true } } },
+    });
+    if (!session || session.collegeId !== payload.collegeId || session.userId !== payload.sub || session.revokedAt || session.expiresAt <= new Date() || session.user.status !== 'ACTIVE' || !session.user.emailVerifiedAt) throw new UnauthorizedException({ code: 'SESSION_EXPIRED', message: 'Session expired.' });
+    return toPublicUser(session.user);
+  }
   private logDevelopmentVerification(email: string, token: string): void { if (!getAuthConfig().isProduction) console.info(`[CampusOS development] Verify ${email}: POST /api/v1/auth/verify-email with {"token":"${token}"}`); }
   private logDevelopmentPasswordReset(email: string, token: string): void { if (!getAuthConfig().isProduction) console.info(`[CampusOS development] Reset password for ${email}: POST /api/v1/auth/reset-password with {"token":"${token}","password":"<new password>"}`); }
 }
@@ -141,4 +154,32 @@ const sign = (value: string): string => createHmac('sha256', getAuthConfig().acc
 const safeEqual = (left: string, right: string): boolean => left.length === right.length && timingSafeEqual(Buffer.from(left), Buffer.from(right));
 export const hashPassword = async (password: string): Promise<string> => { const salt = randomBytes(16); const derived = await scrypt(password, salt, 64) as Buffer; return `scrypt$${salt.toString('base64url')}$${derived.toString('base64url')}`; };
 export const verifyPassword = async (password: string, encoded: string): Promise<boolean> => { const [, saltValue, hashValue] = encoded.split('$'); if (!saltValue || !hashValue) return false; const derived = await scrypt(password, Buffer.from(saltValue, 'base64url'), 64) as Buffer; return safeEqual(derived.toString('base64url'), hashValue); };
-const toPublicUser = (user: { id: string; collegeId: string; email: string; displayName: string; emailVerifiedAt: Date | null }): PublicUser => ({ id: user.id, collegeId: user.collegeId, email: user.email, displayName: user.displayName, emailVerified: Boolean(user.emailVerifiedAt) });
+const toPublicUser = (user: {
+  id: string;
+  collegeId: string;
+  email: string;
+  displayName: string;
+  emailVerifiedAt: Date | null;
+  userRoles?: Array<{ role: { name: string } }>;
+  studentProfiles?: Array<{ id: string }>;
+  facultyProfiles?: Array<{ id: string }>;
+}): PublicUser => {
+  const roleSet = new Set<string>();
+  if (user.userRoles) {
+    for (const ur of user.userRoles) {
+      if (ur.role?.name) roleSet.add(ur.role.name);
+    }
+  }
+  if (roleSet.size === 0) {
+    if (user.studentProfiles && user.studentProfiles.length > 0) roleSet.add('STUDENT');
+    if (user.facultyProfiles && user.facultyProfiles.length > 0) roleSet.add('FACULTY');
+  }
+  return {
+    id: user.id,
+    collegeId: user.collegeId,
+    email: user.email,
+    displayName: user.displayName,
+    emailVerified: Boolean(user.emailVerifiedAt),
+    roles: Array.from(roleSet),
+  };
+};

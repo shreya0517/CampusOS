@@ -4,6 +4,63 @@
 
 CampusOS is a multi-tenant college management SaaS platform. The repository foundation exists to support secure, testable, and maintainable delivery of academic, administrative, and operational workflows without coupling tenant-specific behavior to the core platform.
 
+## Phase Execution Protocol
+
+For every requested phase:
+
+1. Read the relevant master-plan phase and inspect the existing repository before making changes.
+2. Reuse existing architecture, components, services, APIs, utilities, patterns, and dependencies whenever possible.
+3. Implement only the requested phase.
+4. Do not implement future-phase functionality or unrelated refactors.
+5. Do not add dependencies unless genuinely required by the current phase.
+6. Preserve authentication, authorization, validation, tenant isolation, and existing behavior.
+7. Prefer the smallest correct implementation.
+8. Do not commit changes unless explicitly instructed.
+
+### Phase Discovery Protocol
+
+Before implementation:
+
+1. Inspect the relevant existing code, database schema, APIs, tests, and documentation.
+2. Infer implementation details from the repository and master plan whenever possible.
+3. Do not ask questions whose answers can be determined from the repository, master plan, or existing patterns.
+4. Identify only genuinely blocking ambiguities.
+5. If blocking questions exist, ask all of them in one concise message before coding.
+6. If no blocking questions exist, implement immediately.
+7. After receiving answers, continue implementation without repeatedly asking for confirmation.
+
+Rule:
+> Never ask a question merely because you could ask it. Ask only if the answer would materially change the implementation.
+
+### Validation Protocol
+
+Before reporting a phase complete, run:
+
+- `pnpm test`
+- `pnpm lint`
+- `pnpm typecheck`
+- `pnpm build`
+- `git diff --check`
+
+If Prisma/schema/migrations changed, also validate Prisma, generate the client, and verify migration status.
+
+Manually smoke-test the affected functionality when practical.
+
+Final report must include:
+- What was implemented
+- Files changed
+- Validation results
+- Manual verification
+- Remaining issues
+
+### Git Safety
+
+- Never run `git add .`
+- Never stage unrelated or untracked files.
+- Do not modify, delete, add, or stage the persistent root `OS` file unless explicitly instructed.
+- Do not commit unless explicitly instructed.
+- The user handles commits.
+
 ## Architecture Rules
 
 1. Preserve the monorepo split between `apps`, `packages`, and `docs`.

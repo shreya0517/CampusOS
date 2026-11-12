@@ -2,7 +2,7 @@ import { ForbiddenException } from '@nestjs/common';
 import { AuthorizationService } from './authorization.service';
 import type { AuthorizationContext } from './authorization.types';
 
-const user = { id: 'user-a', collegeId: 'college-a', email: 'a@test', displayName: 'A', emailVerified: true };
+const user = { id: 'user-a', collegeId: 'college-a', email: 'a@test', displayName: 'A', emailVerified: true, roles: [] as string[] };
 const createDatabase = (role: string, permissions: string[], departmentId: string | null = null) => ({
   userRole: { findMany: jest.fn().mockResolvedValue([{ role: { name: role, rolePermissions: permissions.map((code) => ({ permission: { code } })) } }]) },
   faculty: { findUnique: jest.fn().mockResolvedValue(departmentId ? { departmentId } : null) },

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { ThemeProvider } from '@/components/theme-provider';
+import { AuthProvider } from '@/components/auth-provider';
 
 export const metadata: Metadata = {
   title: 'CampusOS',
@@ -14,7 +15,7 @@ type RootLayoutProps = Readonly<{
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="en">
-      <body><ThemeProvider>{children}</ThemeProvider></body>
+      <body><ThemeProvider><AuthProvider>{children}</AuthProvider></ThemeProvider></body>
     </html>
   );
 }

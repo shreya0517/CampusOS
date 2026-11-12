@@ -8,3 +8,4 @@ export const REQUIRED_PERMISSIONS = 'campusos:required-permissions';
 export const RequireRoles = (...roles: RoleName[]) => SetMetadata(REQUIRED_ROLES, roles);
 export const RequirePermissions = (...permissions: Permission[]) => SetMetadata(REQUIRED_PERMISSIONS, permissions);
 export const CurrentAuthorization = createParamDecorator((_: unknown, context: ExecutionContext): AuthorizationContext => context.switchToHttp().getRequest<{ authorization: AuthorizationContext }>().authorization);
+export const CurrentContext = CurrentAuthorization;

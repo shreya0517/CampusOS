@@ -104,6 +104,29 @@ enum FileVisibility {
   PUBLIC
 }
 
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  SUBMITTED
+  APPROVED
+  REWORK
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum VisitorStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CHECKED_IN
+  CHECKED_OUT
+}
+
 model College {
   id                      String                   @id @default(cuid())
   code                    String                   @unique
@@ -145,6 +168,9 @@ model College {
   sessions                AuthSession[]
   emailVerificationTokens EmailVerificationToken[]
   passwordResetTokens     PasswordResetToken[]
+  tasks                   Task[]
+  taskAssignments         TaskAssignment[]
+  visitors                Visitor[]
 }
 
 model User {
@@ -168,6 +194,12 @@ model User {
   sessions                AuthSession[]
   emailVerificationTokens EmailVerificationToken[]
   passwordResetTokens     PasswordResetToken[]
+  createdTasks            Task[]                   @relation("TaskCreator")
+  taskAssignments         TaskAssignment[]          @relation("TaskAssignee")
+  reviewedAssignments     TaskAssignment[]          @relation("TaskReviewer")
+  registeredVisitors      Visitor[]                @relation("VisitorRegistrant")
+  approvedVisitors        Visitor[]                @relation("VisitorApprover")
+  hostedVisitors          Visitor[]                @relation("VisitorHost")
 
   @@unique([collegeId, email])
   @@unique([collegeId, id])
@@ -281,6 +313,7 @@ model Department {
   courses   Course[]
   subjects  Subject[]
   faculty   Faculty[]
+  tasks     Task[]
 
   @@unique([collegeId, id])
   @@unique([collegeId, code])
@@ -815,4 +848,74 @@ model AuditLog {
   @@unique([collegeId, id])
   @@index([collegeId, entityType, entityId])
   @@index([collegeId, createdAt])
+}
+
+model Task {
+  id              String          @id @default(cuid())
+  collegeId       String
+  createdByUserId String
+  departmentId    String?
+  title           String
+  description     String?
+  priority        TaskPriority    @default(MEDIUM)
+  deadline        DateTime
+  status          TaskStatus      @default(PENDING)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  college         College         @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  createdBy       User            @relation("TaskCreator", fields: [collegeId, createdByUserId], references: [collegeId, id], onDelete: Restrict)
+  department      Department?     @relation(fields: [collegeId, departmentId], references: [collegeId, id], onDelete: Restrict)
+  assignments     TaskAssignment[]
+
+  @@unique([collegeId, id])
+  @@index([collegeId, status, deadline])
+  @@index([collegeId, departmentId])
+}
+
+model TaskAssignment {
+  id                String     @id @default(cuid())
+  collegeId         String
+  taskId            String
+  assigneeUserId    String
+  status            TaskStatus @default(PENDING)
+  notes             String?
+  submittedAt       DateTime?
+  submissionContent String?
+  reviewedAt        DateTime?
+  reviewedByUserId  String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  college           College    @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  task              Task       @relation(fields: [collegeId, taskId], references: [collegeId, id], onDelete: Cascade)
+  assignee          User       @relation("TaskAssignee", fields: [collegeId, assigneeUserId], references: [collegeId, id], onDelete: Restrict)
+  reviewedBy        User?      @relation("TaskReviewer", fields: [collegeId, reviewedByUserId], references: [collegeId, id], onDelete: Restrict)
+
+  @@unique([collegeId, id])
+  @@unique([collegeId, taskId, assigneeUserId])
+  @@index([collegeId, assigneeUserId, status])
+}
+
+model Visitor {
+  id                 String        @id @default(cuid())
+  collegeId          String
+  registeredByUserId String
+  hostUserId         String?
+  approvedByUserId   String?
+  name               String
+  phone              String
+  email              String?
+  purpose            String
+  visitDate          DateTime      @db.Date
+  status             VisitorStatus @default(PENDING)
+  approvedAt         DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  college            College       @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  registeredBy       User          @relation("VisitorRegistrant", fields: [collegeId, registeredByUserId], references: [collegeId, id], onDelete: Restrict)
+  host               User?         @relation("VisitorHost", fields: [collegeId, hostUserId], references: [collegeId, id], onDelete: Restrict)
+  approvedBy         User?         @relation("VisitorApprover", fields: [collegeId, approvedByUserId], references: [collegeId, id], onDelete: Restrict)
+
+  @@unique([collegeId, id])
+  @@index([collegeId, status, visitDate])
+  @@index([collegeId, registeredByUserId])
 }
