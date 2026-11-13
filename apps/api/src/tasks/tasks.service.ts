@@ -26,6 +26,9 @@ const assignmentMissing = (): never => {
 
 const taskInclude = {
   department: true,
+  createdBy: {
+    select: { id: true, displayName: true },
+  },
 };
 
 const assignmentInclude = {

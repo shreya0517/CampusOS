@@ -16,7 +16,7 @@ export type Task = {
   createdAt: string;
   updatedAt: string;
   department: { id: string; name: string; code: string } | null;
-  createdBy: { id: string; displayName: string; email: string };
+  createdBy: { id: string; displayName: string };
   assignments: TaskAssignment[];
 };
 
