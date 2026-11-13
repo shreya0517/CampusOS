@@ -123,6 +123,13 @@ export class TasksService {
         where,
         include: {
           ...taskInclude,
+          assignments: {
+            select: {
+              id: true,
+              status: true,
+              assigneeUserId: true,
+            },
+          },
           _count: { select: { assignments: true } },
         },
         orderBy: [{ deadline: 'asc' }, { createdAt: 'desc' }],
