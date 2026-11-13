@@ -83,6 +83,31 @@ describe('TasksService WebSocket Event Emissions', () => {
     );
   });
 
+  describe('getTask creator relation', () => {
+    it('includes the creator id and displayName in the task response', async () => {
+      const createdBy = { id: 'admin-1', displayName: 'Campus Admin' };
+      mockDatabase.task.findFirst.mockResolvedValue({
+        id: 'task-100',
+        collegeId: adminContext.collegeId,
+        createdBy,
+        assignments: [],
+      });
+
+      const result = await service.getTask('task-100', adminContext);
+
+      expect(mockDatabase.task.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({
+            createdBy: {
+              select: { id: true, displayName: true },
+            },
+          }),
+        }),
+      );
+      expect(result).toEqual(expect.objectContaining({ createdBy }));
+    });
+  });
+
   describe('createTask', () => {
     const input = {
       title: 'Prepare Syllabus',
