@@ -1,2 +1,2 @@
 import { redirect } from 'next/navigation';
-export default function HomePage() { redirect('/login'); }
+export default function HomePage() { redirect('/dashboard'); } // redirects automatically to dash board for offline testing. Should set to /login for production.
