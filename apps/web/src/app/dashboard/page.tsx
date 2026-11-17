@@ -26,6 +26,7 @@ import { Dialog } from '@/components/ui/interactive';
 import { Table, TableCell, TableHead } from '@/components/ui/table';
 import { EmptyState, Skeleton } from '@/components/feedback/states';
 import { StudentDashboardView } from '@/components/dashboard/student-dashboard-view';
+import { MarksReviewQueue } from '@/components/dashboard/marks-review-queue';
 import { useTaskEvents, TASK_EVENTS } from '@/lib/use-socket';
 
 type QuickStat = { label: string; value: string | number; sub?: string; href?: string };
@@ -152,6 +153,8 @@ function AdminDashboard() {
           href="/dashboard/visitors"
         />
       </div>
+
+      <MarksReviewQueue />
 
       {/* Visitor notification banner */}
       {pendingVisitors > 0 && (
@@ -299,6 +302,8 @@ function HodDashboard() {
           </div>
         </CardContent>
       </Card>
+
+      <MarksReviewQueue />
 
       {/* Visitor pending notification */}
       {pendingVisitors > 0 && (

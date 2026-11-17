@@ -135,6 +135,19 @@ export function getSubjectMarks(
   return authenticatedRequest(`/exams/${examId}/subjects/${examSubjectId}/marks`);
 }
 
+export type MarksReviewItem = {
+  id: string;
+  marksSubmittedAt: string | null;
+  exam: { id: string; name: string };
+  subject: { id: string; code: string; name: string };
+  semester: { id: string; name: string };
+  section: { id: string; code: string } | null;
+};
+
+export function listMarksReviewQueue(): Promise<MarksReviewItem[]> {
+  return authenticatedRequest('/exams/review-queue');
+}
+
 export function submitSubjectMarks(examId: string, examSubjectId: string): Promise<MarksSheet> {
   return authenticatedRequest(`/exams/${examId}/subjects/${examSubjectId}/marks/submit`, { method: 'POST' });
 }

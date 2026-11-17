@@ -351,3 +351,23 @@ describe('ExamsService marks approval', () => {
     expect(parseReviewMarksDto({ decision: 'RETURNED', comment: '  Recheck  ' })).toEqual({ decision: 'RETURNED', comment: 'Recheck' });
   });
 });
+
+describe('ExamsService marks review queue', () => {
+  const hod: AuthorizationContext = { userId: 'hod-user', collegeId: 'col-a', roles: ['HOD'], permissions: [], departmentId: 'dept-a' };
+  const database = { examSubject: { findMany: jest.fn().mockResolvedValue([]) } };
+  const service = new ExamsService(database as never);
+  const lastWhere = (): unknown => (database.examSubject.findMany.mock.calls.at(-1)?.[0] as { where: unknown }).where;
+  beforeEach(() => jest.clearAllMocks());
+
+  it('gives an HOD the submitted papers of their own department only', async () => {
+    await service.listMarksReviewQueue(hod);
+    const inDepartment = { course: { departmentId: 'dept-a' } };
+    expect(lastWhere()).toEqual({ collegeId: 'col-a', marksStatus: 'SUBMITTED', semester: inDepartment, OR: [{ sectionId: null }, { section: { semester: inDepartment } }] });
+  });
+
+  it('gives an admin every submitted paper, and blocks faculty', async () => {
+    await service.listMarksReviewQueue(admin);
+    expect(lastWhere()).toEqual({ collegeId: 'col-a', marksStatus: 'SUBMITTED' });
+    await expect(service.listMarksReviewQueue(faculty)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+});
