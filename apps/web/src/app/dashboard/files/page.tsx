@@ -132,7 +132,7 @@ export default function FilesPage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Object Storage</p>
-          <h1 className="mt-2 text-3xl font-semibold">AWS S3 File Management</h1>
+          <h1 className="mt-2 text-2xl font-bold tracking-tight">AWS S3 File Management</h1>
           <p className="mt-2 text-[hsl(var(--muted-foreground))]">Upload documents, manage permissions, and access secure S3 storage links.</p>
         </div>
       </div>

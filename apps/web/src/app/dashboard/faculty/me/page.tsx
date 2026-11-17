@@ -52,7 +52,7 @@ export default function FacultyDashboardPage() {
     <div className="grid gap-6">
       <div>
         <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Faculty dashboard</p>
-        <h1 className="mt-2 text-3xl font-semibold">Welcome, {faculty.firstName}</h1>
+        <h1 className="mt-2 text-2xl font-bold tracking-tight">Welcome, {faculty.firstName}</h1>
         <p className="mt-2 text-[hsl(var(--muted-foreground))]">Your faculty profile and department details.</p>
       </div>
 

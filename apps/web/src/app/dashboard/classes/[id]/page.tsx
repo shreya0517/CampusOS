@@ -54,7 +54,7 @@ export default function ClassDetailPage() {
           <Link className="text-sm font-semibold text-[hsl(var(--primary))] underline underline-offset-4" href="/dashboard/classes">
             ← My Classes
           </Link>
-          <h1 className="mt-3 text-3xl font-semibold">{cls.subject.name}</h1>
+          <h1 className="mt-3 text-2xl font-bold tracking-tight">{cls.subject.name}</h1>
           <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
             {cls.subject.code} · {cls.section.semester.course.name} · {cls.section.semester.name} · Section {cls.section.code}
           </p>

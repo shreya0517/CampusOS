@@ -76,7 +76,7 @@ export default function VisitorsPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Campus</p>
-          <h1 className="mt-2 text-3xl font-semibold">Visitor Management</h1>
+          <h1 className="mt-2 text-2xl font-bold tracking-tight">Visitor Management</h1>
           <p className="mt-2 text-[hsl(var(--muted-foreground))]">
             {isManager
               ? `Register and manage campus visitors. ${pendingCount > 0 ? `${pendingCount} pending approval.` : ''}`

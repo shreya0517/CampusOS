@@ -42,7 +42,7 @@ export default function NewExamPage() {
         <Link href="/dashboard/exams" className="text-sm font-semibold text-[hsl(var(--primary))] hover:underline">
           &larr; Back to Exams
         </Link>
-        <h1 className="mt-2 text-3xl font-semibold">Create New Examination</h1>
+        <h1 className="mt-2 text-2xl font-bold tracking-tight">Create New Examination</h1>
         <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
           Set up a new examination term for scheduling subject papers and grading.
         </p>

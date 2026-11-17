@@ -75,7 +75,7 @@ export default function NewTaskPage() {
     <div className="grid gap-6">
       <div>
         <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Tasks</p>
-        <h1 className="mt-2 text-3xl font-semibold">Create Task</h1>
+        <h1 className="mt-2 text-2xl font-bold tracking-tight">Create Task</h1>
         <p className="mt-2 text-[hsl(var(--muted-foreground))]">Assign a new task to HOD or faculty.</p>
       </div>
 

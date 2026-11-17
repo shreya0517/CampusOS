@@ -46,7 +46,7 @@ export default function StudentDetailsPage() {
         <Link className="text-sm font-semibold text-[hsl(var(--primary))] underline" href="/dashboard/students">
           &larr; Students Directory
         </Link>
-        <h1 className="mt-3 text-3xl font-semibold">{student.firstName} {student.lastName}</h1>
+        <h1 className="mt-3 text-2xl font-bold tracking-tight">{student.firstName} {student.lastName}</h1>
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

@@ -74,7 +74,7 @@ export default function NewAssignmentPage() {
     <div className="grid gap-6 max-w-3xl">
       <div>
         <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">New Assignment</p>
-        <h1 className="mt-2 text-3xl font-semibold">Create Assignment</h1>
+        <h1 className="mt-2 text-2xl font-bold tracking-tight">Create Assignment</h1>
         <p className="mt-2 text-[hsl(var(--muted-foreground))]">Publish a new assignment for a class section.</p>
       </div>
 

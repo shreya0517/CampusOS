@@ -39,7 +39,7 @@ export default function MyClassesPage() {
   return (
     <div className="grid gap-6">
       <div>
-        <h1 className="text-3xl font-semibold">My Classes</h1>
+        <h1 className="text-2xl font-bold tracking-tight">My Classes</h1>
         <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">The classes you teach, with each one&apos;s students, attendance and coursework.</p>
       </div>
 

@@ -138,7 +138,7 @@ export default function AssignmentDetailPage() {
           <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">
             {assignment.class.subject.name} ({assignment.class.section.code})
           </p>
-          <h1 className="mt-2 text-3xl font-semibold">{assignment.title}</h1>
+          <h1 className="mt-2 text-2xl font-bold tracking-tight">{assignment.title}</h1>
           <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">
             {assignment.class.section.semester.course.name} · Department of {assignment.class.section.semester.course.department.name}
           </p>

@@ -156,7 +156,7 @@ export default function MarksEntryPage() {
         </Link>
         <div className="mt-2 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div>
-            <h1 className="text-3xl font-semibold">Marks Entry & Evaluation</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Marks Entry & Evaluation</h1>
             <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
               {examSubject?.subject?.name ?? 'Subject'} &bull; Max Marks: <strong>{examSubject?.maxMarks}</strong> &bull; Pass Marks: <strong>{examSubject?.passMarks}</strong>
             </p>
