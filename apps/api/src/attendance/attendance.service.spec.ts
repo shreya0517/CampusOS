@@ -19,6 +19,7 @@ describe('AttendanceService', () => {
     attendance: { create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn() },
     attendanceRecord: { deleteMany: jest.fn(), createMany: jest.fn(), findMany: jest.fn() },
     student: { findFirst: jest.fn() },
+    enrollment: { findMany: jest.fn().mockResolvedValue([{ studentId: 'stu-a' }]) },
     $transaction: jest.fn((fn: (txObj: typeof tx) => Promise<void>) => fn(tx)),
   };
   const service = new AttendanceService(database as never);
@@ -83,6 +84,22 @@ describe('AttendanceService', () => {
     await service.updateAttendance('att-a', { records: [{ studentId: 'stu-a', status: AttendanceStatus.ABSENT }] }, admin);
     expect(tx.attendanceRecord.deleteMany).toHaveBeenCalledWith({ where: { collegeId: 'col-a', attendanceId: 'att-a' } });
     expect(tx.attendanceRecord.createMany).toHaveBeenCalled();
+  });
+
+  it('only records attendance for students enrolled in the class section, once each', async () => {
+    database.class.findFirst.mockResolvedValue(mockClass);
+    database.enrollment.findMany.mockResolvedValueOnce([]);
+    await expect(service.createAttendance({ classId: 'class-a', heldOn: '2026-09-01', records: [{ studentId: 'outsider', status: AttendanceStatus.PRESENT }] }, faculty)).rejects.toMatchObject({ response: { code: 'STUDENT_NOT_IN_CLASS' } });
+    expect(database.enrollment.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: { collegeId: 'col-a', sectionId: 'sec-a', status: 'ACTIVE', studentId: { in: ['outsider'] } } }));
+    await expect(service.createAttendance({ classId: 'class-a', heldOn: '2026-09-01', records: [{ studentId: 'stu-a', status: AttendanceStatus.PRESENT }, { studentId: 'stu-a', status: AttendanceStatus.ABSENT }] }, faculty)).rejects.toMatchObject({ response: { code: 'DUPLICATE_STUDENT' } });
+    expect(database.attendance.create).not.toHaveBeenCalled();
+  });
+
+  it('checks enrollment on updates too', async () => {
+    database.attendance.findFirst.mockResolvedValue(mockAttendance);
+    database.enrollment.findMany.mockResolvedValueOnce([]);
+    await expect(service.updateAttendance('att-a', { records: [{ studentId: 'outsider', status: AttendanceStatus.PRESENT }] }, admin)).rejects.toMatchObject({ response: { code: 'STUDENT_NOT_IN_CLASS' } });
+    expect(tx.attendanceRecord.deleteMany).not.toHaveBeenCalled();
   });
 
   describe('getMyAttendance', () => {

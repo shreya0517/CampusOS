@@ -98,7 +98,7 @@ All student endpoints require a bearer access token and derive tenant, role, and
 - PUT /api/v1/students/:id: ADMIN/HOD update profile fields.
 - POST /api/v1/students/:id/enrollments: ADMIN/HOD add or update a section enrollment. Body: { sectionId, status? }.
 
-FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD and FACULTY access is restricted to students whose enrolled section belongs to their authenticated faculty department. Association requests validate that the section belongs to the authenticated college and department; cross-college and cross-department IDs return 403 FORBIDDEN without resource details.
+FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD access is restricted to students whose enrolled section belongs to the HOD's department; a courseId filter narrows that scope and never widens it. FACULTY access is restricted further, to students actively enrolled in a section where the faculty member teaches a class. Association requests validate that the section belongs to the authenticated college and department; cross-college and cross-department IDs return 403 FORBIDDEN without resource details.
 
 ## Student Attendance
 
@@ -113,3 +113,9 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 - GET /api/v1/announcements: any signed-in user. Returns published, unexpired announcements in the caller's college, newest first, with the author's id and display name. Query: search? (title or body), page (default 1), pageSize (default 10, max 50).
   - Audience rules: STUDENT sees ALL and STUDENTS; FACULTY and HOD see ALL, FACULTY and STAFF; ADMIN sees every audience.
 - POST /api/v1/announcements: ADMIN only. Body: { title (3-160 chars), body (1-5000 chars), audience? (ALL, STUDENTS, FACULTY or STAFF; default ALL), publishedAt?, expiresAt? }. The college and author come from the access token. publishedAt defaults to now; expiresAt must be after it.
+
+## Attendance and Marks Entry
+
+- POST /api/v1/attendance and PUT /api/v1/attendance/:id: every record must name a different student who is actively enrolled in the class's section; otherwise 400 DUPLICATE_STUDENT or 400 STUDENT_NOT_IN_CLASS.
+- GET and PUT /api/v1/exams/:id/subjects/:examSubjectId/marks: ADMIN reaches every paper, HOD only papers in their department, FACULTY only papers for a subject they teach in that section (or semester, when the paper covers every section); otherwise 403. Marks must name different students enrolled for the paper; otherwise 400 DUPLICATE_STUDENT or 400 STUDENT_NOT_IN_EXAM.
+- POST /api/v1/exams/:id/calculate-results: ADMIN and HOD only. Faculty enter marks but don't publish results.

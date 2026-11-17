@@ -214,6 +214,33 @@ export class ExamsService {
     return { success: true };
   }
 
+  /**
+   * Admins reach every paper. HODs stay inside their department. Faculty only reach papers for a subject they
+   * teach in that section (or in that semester, when the paper covers every section).
+   */
+  private async assertCanEnterMarks(examSubject: { subjectId: string; sectionId: string | null; semesterId: string }, context: AuthorizationContext): Promise<void> {
+    if (context.roles.includes('ADMIN') || context.roles.includes('SUPER_ADMIN')) return;
+    if (context.roles.includes('HOD')) {
+      if (!context.departmentId) denied();
+      const inDepartment = await this.database.semester.findFirst({
+        where: { id: examSubject.semesterId, collegeId: context.collegeId, course: { departmentId: context.departmentId ?? '' } },
+        select: { id: true },
+      });
+      if (!inDepartment) denied();
+      return;
+    }
+    const teaches = await this.database.class.findFirst({
+      where: {
+        collegeId: context.collegeId,
+        subjectId: examSubject.subjectId,
+        faculty: { userId: context.userId },
+        ...(examSubject.sectionId ? { sectionId: examSubject.sectionId } : { section: { semesterId: examSubject.semesterId } }),
+      },
+      select: { id: true },
+    });
+    if (!teaches) denied();
+  }
+
   async getSubjectMarks(examSubjectId: string, context: AuthorizationContext) {
     if (context.roles.includes('STUDENT')) denied();
 
@@ -226,6 +253,7 @@ export class ExamsService {
       },
     });
     if (!examSubject) throw examSubjectMissing();
+    await this.assertCanEnterMarks(examSubject, context);
 
     // Fetch all active enrolled students in this section/semester
     const enrollmentWhere: Record<string, unknown> = {
@@ -269,6 +297,7 @@ export class ExamsService {
       where: { id: examSubjectId, collegeId: context.collegeId },
     });
     if (!examSubject) throw examSubjectMissing();
+    await this.assertCanEnterMarks(examSubject, context);
 
     const maxMarks = Number(examSubject.maxMarks);
 
@@ -280,6 +309,25 @@ export class ExamsService {
           message: `Marks obtained (${m.marksObtained}) cannot exceed maximum marks (${maxMarks}).`,
         });
       }
+    }
+
+    // Marks can only be recorded once per student, and only for students sitting this paper.
+    const studentIds = [...new Set(input.marks.map((m) => m.studentId))];
+    if (studentIds.length !== input.marks.length) {
+      throw new BadRequestException({ code: 'DUPLICATE_STUDENT', message: 'Each student can appear only once in a marks update.' });
+    }
+    const eligible = await this.database.enrollment.findMany({
+      where: {
+        collegeId: context.collegeId,
+        status: 'ACTIVE',
+        studentId: { in: studentIds },
+        ...(examSubject.sectionId ? { sectionId: examSubject.sectionId } : { section: { semesterId: examSubject.semesterId } }),
+      },
+      select: { studentId: true },
+      distinct: ['studentId'],
+    });
+    if (eligible.length !== studentIds.length) {
+      throw new BadRequestException({ code: 'STUDENT_NOT_IN_EXAM', message: 'Marks can only be entered for students enrolled for this paper.' });
     }
 
     await this.database.$transaction(async (tx) => {
@@ -311,7 +359,8 @@ export class ExamsService {
   }
 
   async calculateAndPublishResults(examId: string, context: AuthorizationContext) {
-    if (!context.roles.includes('ADMIN') && !context.roles.includes('HOD') && !context.roles.includes('FACULTY')) denied();
+    // Faculty enter marks; publishing results stays with HOD and Admin.
+    if (!context.roles.includes('ADMIN') && !context.roles.includes('HOD')) denied();
 
     const exam = await this.database.exam.findFirst({
       where: { id: examId, collegeId: context.collegeId },

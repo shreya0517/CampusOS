@@ -98,7 +98,7 @@ export class ExamsController {
   }
 
   @Post(':id/calculate-results')
-  @RequireRoles('ADMIN', 'HOD', 'FACULTY')
+  @RequireRoles('ADMIN', 'HOD')
   async calculateAndPublishResults(@Param('id') id: string, @CurrentAuthorization() context: AuthorizationContext) {
     return this.service.calculateAndPublishResults(id, context);
   }

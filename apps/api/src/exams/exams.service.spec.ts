@@ -54,6 +54,12 @@ describe('ExamsService', () => {
     enrollment: {
       findMany: jest.fn(),
     },
+    class: {
+      findFirst: jest.fn(),
+    },
+    semester: {
+      findFirst: jest.fn(),
+    },
     $transaction: mockTransaction,
   };
   mockTransaction.mockImplementation((fn: (tx: typeof database) => Promise<unknown>) => fn(database));
@@ -106,6 +112,7 @@ describe('ExamsService', () => {
   });
 
   it('validates marks obtained does not exceed maxMarks on updateSubjectMarks', async () => {
+    database.class.findFirst.mockResolvedValue({ id: 'class-1' });
     database.examSubject.findFirst.mockResolvedValue({
       id: 'sub-1',
       collegeId: 'col-a',
@@ -182,5 +189,58 @@ describe('ExamsService student fields in results', () => {
     expect(database.result.findMany).toHaveBeenCalledWith(expect.objectContaining({
       include: { student: { select: { id: true, studentCode: true, firstName: true, lastName: true } } },
     }));
+  });
+});
+
+describe('ExamsService marks access', () => {
+  const hod: AuthorizationContext = { userId: 'hod-user', collegeId: 'col-a', roles: ['HOD'], permissions: [], departmentId: 'dept-a' };
+  const paper = { id: 'es-1', collegeId: 'col-a', subjectId: 'subj-1', sectionId: 'sec-1', semesterId: 'sem-1', maxMarks: 50 };
+  const database = {
+    examSubject: { findFirst: jest.fn().mockResolvedValue(paper) },
+    class: { findFirst: jest.fn() },
+    semester: { findFirst: jest.fn() },
+    enrollment: { findMany: jest.fn().mockResolvedValue([]) },
+    mark: { findMany: jest.fn().mockResolvedValue([]), upsert: jest.fn() },
+    exam: { findFirst: jest.fn() },
+    $transaction: jest.fn(),
+  };
+  database.$transaction.mockImplementation((fn: (tx: typeof database) => Promise<unknown>) => fn(database));
+  const service = new ExamsService(database as never);
+  beforeEach(() => jest.clearAllMocks());
+
+  it('lets faculty open and enter marks only for a subject they teach in that section', async () => {
+    database.class.findFirst.mockResolvedValue(null);
+    await expect(service.getSubjectMarks('es-1', faculty)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.updateSubjectMarks('es-1', { marks: [{ studentId: 'stu-1', marksObtained: 40 }] }, faculty)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(database.class.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { collegeId: 'col-a', subjectId: 'subj-1', faculty: { userId: 'faculty-user' }, sectionId: 'sec-1' },
+    }));
+    expect(database.mark.upsert).not.toHaveBeenCalled();
+  });
+
+  it('keeps HODs inside their department', async () => {
+    database.semester.findFirst.mockResolvedValue(null);
+    await expect(service.getSubjectMarks('es-1', hod)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(database.semester.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'sem-1', collegeId: 'col-a', course: { departmentId: 'dept-a' } } }));
+  });
+
+  it('rejects marks for students who are not enrolled for the paper', async () => {
+    database.class.findFirst.mockResolvedValue({ id: 'class-1' });
+    database.enrollment.findMany.mockResolvedValueOnce([{ studentId: 'stu-1' }]);
+    await expect(service.updateSubjectMarks('es-1', { marks: [{ studentId: 'stu-1', marksObtained: 40 }, { studentId: 'outsider', marksObtained: 45 }] }, faculty)).rejects.toMatchObject({ response: { code: 'STUDENT_NOT_IN_EXAM' } });
+    await expect(service.updateSubjectMarks('es-1', { marks: [{ studentId: 'stu-1', marksObtained: 40 }, { studentId: 'stu-1', marksObtained: 41 }] }, faculty)).rejects.toMatchObject({ response: { code: 'DUPLICATE_STUDENT' } });
+    expect(database.mark.upsert).not.toHaveBeenCalled();
+  });
+
+  it('saves marks when the faculty teaches the subject and the students are enrolled', async () => {
+    database.class.findFirst.mockResolvedValue({ id: 'class-1' });
+    database.enrollment.findMany.mockResolvedValueOnce([{ studentId: 'stu-1' }]);
+    await expect(service.updateSubjectMarks('es-1', { marks: [{ studentId: 'stu-1', marksObtained: 40 }] }, faculty)).resolves.toEqual({ success: true, count: 1 });
+    expect(database.mark.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let faculty publish results', async () => {
+    await expect(service.calculateAndPublishResults('exam-1', faculty)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(database.exam.findFirst).not.toHaveBeenCalled();
   });
 });
