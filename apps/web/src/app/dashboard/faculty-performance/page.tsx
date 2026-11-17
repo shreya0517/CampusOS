@@ -1,163 +1,149 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import { useAuth } from '@/components/auth-provider';
+import { EmptyState, ErrorState, Skeleton } from '@/components/feedback/states';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { listFaculty, listDepartments, type Department, type Faculty } from '@/lib/faculty-api';
-
-type DeptGroup = {
-  department: Department;
-  faculty: Faculty[];
-};
+import { Select } from '@/components/ui/form-field';
+import { Table, TableCell, TableHead } from '@/components/ui/table';
+import { getFacultyPerformance, listDepartments } from '@/lib/faculty-api';
+import type { Department, FacultyPerformanceRow } from '@/lib/faculty-api';
 
 export default function FacultyPerformancePage() {
-  const [groups, setGroups] = useState<DeptGroup[]>([]);
-  const [unassigned, setUnassigned] = useState<Faculty[]>([]);
-  const [totalFaculty, setTotalFaculty] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const { primaryRole } = useAuth();
+  const isAdmin = primaryRole === 'Admin';
+  const [rows, setRows] = useState<FacultyPerformanceRow[] | null>(null);
+  const [windowDays, setWindowDays] = useState(30);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [departmentId, setDepartmentId] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const deptParams = new URLSearchParams({ page: '1', pageSize: '50' });
-    const facultyParams = new URLSearchParams({ page: '1', pageSize: '200' });
+    if (isAdmin) listDepartments(new URLSearchParams({ page: '1', pageSize: '100' })).then((list) => setDepartments(list.items)).catch(() => undefined);
+  }, [isAdmin]);
 
-    Promise.all([listDepartments(deptParams), listFaculty(facultyParams)])
-      .then(([deptList, facultyList]) => {
-        setTotalFaculty(facultyList.total);
+  const load = async (): Promise<void> => {
+    setError(null);
+    setRows(null);
+    try {
+      const report = await getFacultyPerformance(departmentId || undefined);
+      setRows(report.faculty);
+      setWindowDays(report.windowDays);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Faculty performance could not be loaded.');
+    }
+  };
 
-        // Group faculty by department
-        const byDept = new Map<string, Faculty[]>();
-        const noAssignment: Faculty[] = [];
+  useEffect(() => {
+    void load();
+  }, [departmentId]);
 
-        for (const f of facultyList.items) {
-          if (f.departmentId) {
-            if (!byDept.has(f.departmentId)) byDept.set(f.departmentId, []);
-            byDept.get(f.departmentId)!.push(f);
-          } else {
-            noAssignment.push(f);
-          }
-        }
-
-        const grouped: DeptGroup[] = deptList.items
-          .filter((d) => byDept.has(d.id))
-          .map((d) => ({ department: d, faculty: byDept.get(d.id)! }));
-
-        setGroups(grouped);
-        setUnassigned(noAssignment);
-        setLoading(false);
-      })
-      .catch(() => {
-        setError('Failed to load faculty data.');
-        setLoading(false);
-      });
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="grid gap-6">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Admin</p>
-          <h1 className="mt-2 text-3xl font-semibold">Faculty Performance</h1>
-        </div>
-        <p className="text-[hsl(var(--muted-foreground))]">Loading…</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="grid gap-6">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Admin</p>
-          <h1 className="mt-2 text-3xl font-semibold">Faculty Performance</h1>
-        </div>
-        <Card className="border-destructive">
-          <CardContent className="pt-5">
-            <p className="text-sm text-destructive">{error}</p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const totals = (rows ?? []).reduce(
+    (sum, row) => ({
+      sessions: sum.sessions + row.sessionsMarked,
+      toEvaluate: sum.toEvaluate + row.pendingEvaluations,
+      openTasks: sum.openTasks + row.tasks.pending + row.tasks.inProgress + row.tasks.rework,
+      overdue: sum.overdue + row.tasks.overdue,
+    }),
+    { sessions: 0, toEvaluate: 0, openTasks: 0, overdue: 0 },
+  );
 
   return (
-    <div className="grid gap-8">
-      <div className="flex items-start justify-between">
+    <div className="grid gap-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Admin</p>
-          <h1 className="mt-2 text-3xl font-semibold">Faculty Performance</h1>
-          <p className="mt-2 max-w-2xl text-[hsl(var(--muted-foreground))]">
-            {totalFaculty} faculty member{totalFaculty !== 1 ? 's' : ''} across {groups.length} department
-            {groups.length !== 1 ? 's' : ''}.
+          <h1 className="text-3xl font-semibold">Faculty Performance</h1>
+          <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+            Workload and activity from system records{isAdmin ? '' : ' for your department'}. Sessions and assignments cover the last {windowDays} days.
           </p>
         </div>
-        <Link
-          href="/dashboard/faculty"
-          className="text-sm font-semibold text-[hsl(var(--primary))] underline underline-offset-4"
-        >
-          Full Faculty Directory →
-        </Link>
+        {isAdmin && (
+          <div className="w-64">
+            <Select label="Department" value={departmentId} onChange={(event) => setDepartmentId(event.target.value)}>
+              <option value="">All departments</option>
+              {departments.map((department) => (
+                <option key={department.id} value={department.id}>
+                  {department.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
       </div>
 
-      {/* Dept groups */}
-      {groups.length === 0 && unassigned.length === 0 && (
-        <Card>
-          <CardContent className="pt-5">
-            <p className="text-sm text-[hsl(var(--muted-foreground))]">No faculty members found.</p>
-          </CardContent>
-        </Card>
-      )}
+      {error ? (
+        <ErrorState message={error} onRetry={() => void load()} />
+      ) : !rows ? (
+        <Skeleton className="h-72 w-full" />
+      ) : rows.length === 0 ? (
+        <EmptyState title="No faculty here yet" description="Faculty records in this department will appear here." />
+      ) : (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              { label: 'Faculty', value: rows.length },
+              { label: `Sessions marked (${windowDays} days)`, value: totals.sessions },
+              { label: 'Submissions to evaluate', value: totals.toEvaluate, tone: totals.toEvaluate > 0 ? 'text-amber-600 dark:text-amber-400' : '' },
+              { label: 'Overdue tasks', value: totals.overdue, tone: totals.overdue > 0 ? 'text-rose-600 dark:text-rose-400' : '' },
+            ].map((stat) => (
+              <Card key={stat.label}>
+                <CardContent className="pt-5">
+                  <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))]">{stat.label}</p>
+                  <p className={`mt-1 text-2xl font-bold tabular-nums ${stat.tone ?? ''}`}>{stat.value}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
 
-      {groups.map(({ department, faculty }) => (
-        <Card key={department.id}>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>{department.name}</CardTitle>
-                <CardDescription>
-                  {department.code} · {faculty.length} faculty member{faculty.length !== 1 ? 's' : ''}
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="divide-y">
-              {faculty.map((f) => (
-                <div key={f.id} className="flex items-center justify-between py-3">
-                  <div>
-                    <p className="font-medium">
-                      {f.firstName} {f.lastName}
-                    </p>
-                    <p className="text-xs text-[hsl(var(--muted-foreground))]">{f.employeeCode}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      ))}
-
-      {unassigned.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Unassigned Faculty</CardTitle>
-            <CardDescription>Faculty members without a department assignment.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="divide-y">
-              {unassigned.map((f) => (
-                <div key={f.id} className="flex items-center justify-between py-3">
-                  <div>
-                    <p className="font-medium">
-                      {f.firstName} {f.lastName}
-                    </p>
-                    <p className="text-xs text-[hsl(var(--muted-foreground))]">{f.employeeCode}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>By faculty member</CardTitle>
+              <CardDescription>{totals.openTasks} task{totals.openTasks === 1 ? '' : 's'} still open across the list.</CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <thead>
+                  <tr>
+                    <TableHead>Faculty</TableHead>
+                    <TableHead>Classes</TableHead>
+                    <TableHead>Sessions marked</TableHead>
+                    <TableHead>Assignments set</TableHead>
+                    <TableHead>To evaluate</TableHead>
+                    <TableHead>Tasks open / done</TableHead>
+                    <TableHead>Overdue</TableHead>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => {
+                    const open = row.tasks.pending + row.tasks.inProgress + row.tasks.rework;
+                    return (
+                      <tr key={row.faculty.id}>
+                        <TableCell>
+                          <Link href={`/dashboard/faculty/${row.faculty.id}`} className="font-semibold hover:underline">
+                            {row.faculty.firstName} {row.faculty.lastName}
+                          </Link>
+                          <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                            {row.faculty.employeeCode}
+                            {isAdmin && row.faculty.department ? ` · ${row.faculty.department.code}` : ''}
+                          </p>
+                        </TableCell>
+                        <TableCell>{row.classes}</TableCell>
+                        <TableCell>{row.sessionsMarked}</TableCell>
+                        <TableCell>{row.assignmentsCreated}</TableCell>
+                        <TableCell className={row.pendingEvaluations > 0 ? 'font-semibold text-amber-600 dark:text-amber-400' : ''}>{row.pendingEvaluations}</TableCell>
+                        <TableCell>
+                          {open} open · {row.tasks.submitted} awaiting review · {row.tasks.approved} approved
+                        </TableCell>
+                        <TableCell className={row.tasks.overdue > 0 ? 'font-semibold text-rose-600 dark:text-rose-400' : ''}>{row.tasks.overdue}</TableCell>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </Table>
+            </CardContent>
+          </Card>
+        </>
       )}
     </div>
   );
