@@ -220,6 +220,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <button
               type="button"
               onClick={handleLogout}
+              aria-label="Sign out"
               className="inline-flex items-center gap-2 rounded-md border bg-[hsl(var(--card))] px-3 py-2 text-sm font-medium text-[hsl(var(--muted-foreground))] transition-colors hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]"
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
