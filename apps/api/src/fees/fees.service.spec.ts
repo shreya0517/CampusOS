@@ -188,3 +188,35 @@ describe('FeesService', () => {
     });
   });
 });
+
+describe('FeesService fee structure visibility', () => {
+  const database = { feeStructure: { findMany: jest.fn().mockResolvedValue([]) }, student: { findFirst: jest.fn() } };
+  const service = new FeesService(database as unknown as DatabaseService);
+  const structureWhere = (): unknown => (database.feeStructure.findMany.mock.calls.at(-1)?.[0] as { where: unknown }).where;
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('shows students only college-wide structures and the ones for their course and semester', async () => {
+    database.student.findFirst.mockResolvedValue({ enrollments: [{ section: { semesterId: 'sem-1', semester: { courseId: 'course-1' } } }] });
+    await service.listFeeStructures(studentContext);
+    expect(structureWhere()).toEqual({
+      collegeId: 'col-a',
+      OR: [
+        { courseId: null, semesterId: null },
+        { AND: [{ OR: [{ courseId: null }, { courseId: 'course-1' }] }, { OR: [{ semesterId: null }, { semesterId: 'sem-1' }] }] },
+      ],
+    });
+  });
+
+  it('shows a student without enrollments only college-wide structures', async () => {
+    database.student.findFirst.mockResolvedValue(null);
+    await service.listFeeStructures(studentContext);
+    expect(structureWhere()).toEqual({ collegeId: 'col-a', OR: [{ courseId: null, semesterId: null }] });
+  });
+
+  it('shows staff every structure in the college', async () => {
+    await service.listFeeStructures(admin);
+    expect(structureWhere()).toEqual({ collegeId: 'col-a' });
+    expect(database.student.findFirst).not.toHaveBeenCalled();
+  });
+});

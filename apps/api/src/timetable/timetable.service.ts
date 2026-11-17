@@ -155,6 +155,21 @@ export class TimetableService {
     });
   }
 
+  private isStudentOnly(context: AuthorizationContext): boolean {
+    return context.roles.includes('STUDENT') && !context.roles.some((role) => role === 'SUPER_ADMIN' || role === 'ADMIN' || role === 'HOD' || role === 'FACULTY');
+  }
+
+  /** Sections the signed-in student is actively enrolled in. */
+  private async studentSectionIds(context: AuthorizationContext): Promise<string[]> {
+    const student = await this.database.student.findFirst({ where: { collegeId: context.collegeId, userId: context.userId }, select: { id: true } });
+    if (!student) return [];
+    const enrollments = await this.database.enrollment.findMany({
+      where: { collegeId: context.collegeId, studentId: student.id, status: 'ACTIVE' },
+      select: { sectionId: true },
+    });
+    return enrollments.map((enrollment) => enrollment.sectionId);
+  }
+
   async listEntries(query: TimetableListQuery, context: AuthorizationContext) {
     const where: Record<string, unknown> = { collegeId: context.collegeId };
 
@@ -172,6 +187,12 @@ export class TimetableService {
       if (query.sectionId) classWhere.sectionId = query.sectionId;
       if (query.facultyId) classWhere.facultyId = query.facultyId;
       where.class = classWhere;
+    }
+    if (this.isStudentOnly(context)) {
+      // Students only see the timetable of the sections they are enrolled in.
+      const sectionIds = await this.studentSectionIds(context);
+      const allowed = query.sectionId ? sectionIds.filter((id) => id === query.sectionId) : sectionIds;
+      where.class = { ...((where.class as Record<string, unknown> | undefined) ?? {}), sectionId: { in: allowed } };
     }
 
     const total = await this.database.timetable.count({ where });
@@ -338,8 +359,9 @@ export class TimetableService {
   }
 
   async getClasses(context: AuthorizationContext) {
+    const sectionScope = this.isStudentOnly(context) ? { sectionId: { in: await this.studentSectionIds(context) } } : {};
     return this.database.class.findMany({
-      where: { collegeId: context.collegeId },
+      where: { collegeId: context.collegeId, ...sectionScope },
       include: {
         subject: true,
         section: true,
