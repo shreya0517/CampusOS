@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../database.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
 import type { AttendanceStatus } from '@prisma/client';
@@ -44,6 +44,14 @@ export class AttendanceService {
     return cls!;
   }
 
+  /** Attendance can only be recorded once per student, and only for students actively enrolled in the class's section. */
+  private async assertStudentsInSection(sectionId: string, studentIds: string[], context: AuthorizationContext): Promise<void> {
+    const unique = [...new Set(studentIds)];
+    if (unique.length !== studentIds.length) throw new BadRequestException({ code: 'DUPLICATE_STUDENT', message: 'Each student can appear only once in an attendance session.' });
+    const enrolled = await this.database.enrollment.findMany({ where: { collegeId: context.collegeId, sectionId, status: 'ACTIVE', studentId: { in: unique } }, select: { studentId: true } });
+    if (enrolled.length !== unique.length) throw new BadRequestException({ code: 'STUDENT_NOT_IN_CLASS', message: 'Attendance can only be recorded for students enrolled in this class.' });
+  }
+
   async listClasses(query: ClassListQuery, context: AuthorizationContext) {
     if (context.roles.includes('STUDENT')) denied();
     const where = this.classWhere(context, { departmentId: query.departmentId, sectionId: query.sectionId });
@@ -56,7 +64,8 @@ export class AttendanceService {
 
   async createAttendance(input: CreateAttendanceDto, context: AuthorizationContext) {
     if (context.roles.includes('STUDENT')) denied();
-    await this.resolveClass(input.classId, context);
+    const cls = await this.resolveClass(input.classId, context);
+    await this.assertStudentsInSection(cls.sectionId, input.records.map((r) => r.studentId), context);
     try {
       const attendance = await this.database.attendance.create({
         data: {
@@ -156,6 +165,7 @@ export class AttendanceService {
   async updateAttendance(id: string, input: UpdateAttendanceDto, context: AuthorizationContext) {
     if (context.roles.includes('STUDENT')) denied();
     const attendance = await this.getAttendance(id, context);
+    await this.assertStudentsInSection(attendance.class.sectionId, input.records.map((r) => r.studentId), context);
     await this.database.$transaction(async (tx) => {
       await tx.attendanceRecord.deleteMany({ where: { collegeId: context.collegeId, attendanceId: attendance.id } });
       await tx.attendanceRecord.createMany({
