@@ -17,6 +17,8 @@ import { getMyResults, listExams } from '@/lib/exams-api';
 import type { Exam, Mark, Result } from '@/lib/exams-api';
 import { getMyInvoices } from '@/lib/fees-api';
 import type { Invoice } from '@/lib/fees-api';
+import { getMyAttendance } from '@/lib/attendance-api';
+import type { AttendanceSummary, MyAttendance } from '@/lib/attendance-api';
 
 const INVOICE_STATUS_BADGE: Record<string, string> = {
   PAID: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200',
@@ -53,6 +55,12 @@ function formatTime(dateOrStr: string): string {
   }
   return dateOrStr.slice(0, 5);
 }
+
+const formatAttendance = (summary: AttendanceSummary): string =>
+  summary.percentage === null ? '—' : `${summary.percentage.toFixed(1)}%`;
+
+const attendanceColor = (summary: AttendanceSummary): string =>
+  summary.percentage === null ? '' : summary.belowThreshold ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600';
 
 function StatCard({
   label,
@@ -96,6 +104,8 @@ export function StudentDashboardView() {
   const [results, setResults] = useState<Result[]>([]);
   const [marks, setMarks] = useState<Mark[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [attendance, setAttendance] = useState<MyAttendance | null>(null);
+  const [attendanceFailed, setAttendanceFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -103,13 +113,14 @@ export function StudentDashboardView() {
     setLoading(true);
     setError(null);
     try {
-      const [stuRes, ttRes, assignRes, examsRes, resRes, invRes] = await Promise.allSettled([
+      const [stuRes, ttRes, assignRes, examsRes, resRes, invRes, attRes] = await Promise.allSettled([
         getMyStudent(),
         getMyTimetable(),
         listAssignments(new URLSearchParams({ page: '1', pageSize: '10' })),
         listExams(new URLSearchParams({ page: '1', pageSize: '10' })),
         getMyResults(),
         getMyInvoices(),
+        getMyAttendance(new URLSearchParams({ pageSize: '1' })),
       ]);
 
       if (stuRes.status === 'fulfilled') {
@@ -126,6 +137,9 @@ export function StudentDashboardView() {
         setMarks(resRes.value.marks);
       }
       if (invRes.status === 'fulfilled') setInvoices(invRes.value);
+      // Never show a made-up attendance figure: if the request fails, the dashboard says so.
+      setAttendance(attRes.status === 'fulfilled' ? attRes.value : null);
+      setAttendanceFailed(attRes.status === 'rejected');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Your student dashboard could not be loaded.');
     } finally {
@@ -187,6 +201,15 @@ export function StudentDashboardView() {
         .map((t) => [t.class.subject.id, t.class.subject])
     ).values()
   );
+
+  const attendanceBySubject = new Map((attendance?.subjects ?? []).map((entry) => [entry.subject.id, entry]));
+  const subjectRows = [
+    ...uniqueSubjects.map((subject) => ({ subject, summary: attendanceBySubject.get(subject.id) ?? null })),
+    ...(attendance?.subjects ?? [])
+      .filter((entry) => !uniqueSubjects.some((subject) => subject.id === entry.subject.id))
+      .map((entry) => ({ subject: entry.subject, summary: entry })),
+  ];
+  const shortSubjects = (attendance?.subjects ?? []).filter((entry) => entry.belowThreshold);
 
   const pendingAssignments = assignments.filter(
     (a) => !a.mySubmission || a.mySubmission.status === 'DRAFT'
@@ -287,11 +310,17 @@ export function StudentDashboardView() {
       {/* ─── B. Academic Overview Cards ────────────────────────────────────── */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <StatCard
-          label="Attendance Status"
-          value="75% Min"
-          sub="Policy Requirement"
-          href="#attendance-overview"
-          valueColor="text-blue-600 dark:text-blue-400"
+          label="Attendance"
+          value={attendance ? formatAttendance(attendance.overall) : 'Unavailable'}
+          sub={
+            !attendance
+              ? 'Could not load attendance'
+              : attendance.overall.counted === 0
+                ? 'No classes recorded yet'
+                : `${attendance.overall.attended}/${attendance.overall.counted} classes · min ${attendance.threshold}%`
+          }
+          href="/dashboard/student/attendance"
+          valueColor={attendance ? attendanceColor(attendance.overall) : 'text-[hsl(var(--muted-foreground))]'}
         />
         <StatCard
           label="Enrolled Subjects"
@@ -479,71 +508,98 @@ export function StudentDashboardView() {
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <CardTitle>Attendance &amp; Academic Engagement</CardTitle>
-              <CardDescription>
-                Subject-wise registration and institutional attendance policy compliance.
-              </CardDescription>
+              <CardTitle>Attendance</CardTitle>
+              <CardDescription>Subject-wise attendance recorded by your faculty.</CardDescription>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center rounded-full bg-blue-50 dark:bg-blue-950/40 px-3 py-1 text-xs font-semibold text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                Mandatory Threshold: 75%
-              </span>
-            </div>
+            <Link
+              href="/dashboard/student/attendance"
+              className="text-xs font-semibold text-[hsl(var(--primary))] underline underline-offset-4"
+            >
+              Attendance Details →
+            </Link>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="rounded-[var(--radius)] border bg-[hsl(var(--muted))]/30 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className="text-sm font-semibold">Institutional Attendance Threshold</p>
-                <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                  Under college academic regulations, students must maintain a minimum of 75% attendance in each course to be eligible for term-end examinations.
-                </p>
-              </div>
-              <span className="text-xs font-bold text-emerald-700 bg-emerald-100 dark:bg-emerald-950 px-2.5 py-1 rounded-full">
-                Active Enrolled Status
-              </span>
-            </div>
-            <div className="mt-3 h-2.5 w-full rounded-full bg-[hsl(var(--muted))] overflow-hidden">
-              <div
-                className="h-full bg-emerald-500 rounded-full"
-                style={{ width: '100%' }}
-                aria-label="Attendance standing"
-              />
-            </div>
-          </div>
-
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))] mb-2">
-              Registered Subjects ({uniqueSubjects.length})
-            </p>
-            {uniqueSubjects.length === 0 ? (
-              <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                No active subjects associated with your section timetable yet.
-              </p>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {uniqueSubjects.map((sub) => (
-                  <div
-                    key={sub.id}
-                    className="rounded-[var(--radius)] border p-3 bg-[hsl(var(--background))] space-y-1"
-                  >
-                    <p className="text-xs font-bold text-[hsl(var(--primary))] uppercase tracking-wider">
-                      {sub.code}
-                    </p>
-                    <p className="text-sm font-medium leading-tight">{sub.name}</p>
-                    <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
-                      Lecture sessions tracked via faculty attendance logs.
+          {!attendance ? (
+            <ErrorState
+              message={attendanceFailed ? 'Your attendance could not be loaded right now.' : 'Attendance is not available yet.'}
+              onRetry={() => void loadData()}
+            />
+          ) : (
+            <>
+              <div className="rounded-[var(--radius)] border bg-[hsl(var(--muted))]/30 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold">Overall attendance: {formatAttendance(attendance.overall)}</p>
+                    <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                      {attendance.overall.counted === 0
+                        ? 'No classes have been marked yet.'
+                        : `${attendance.overall.attended} of ${attendance.overall.counted} classes attended. You need at least ${attendance.threshold}% in each subject.`}
                     </p>
                   </div>
-                ))}
+                  {attendance.overall.counted > 0 && (
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                        shortSubjects.length > 0
+                          ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-200'
+                          : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
+                      }`}
+                    >
+                      {shortSubjects.length > 0
+                        ? `Short in ${shortSubjects.length} subject${shortSubjects.length > 1 ? 's' : ''}`
+                        : 'On track'}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-3 h-2.5 w-full rounded-full bg-[hsl(var(--muted))] overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${attendance.overall.belowThreshold ? 'bg-rose-500' : 'bg-emerald-500'}`}
+                    style={{ width: `${attendance.overall.percentage ?? 0}%` }}
+                    role="progressbar"
+                    aria-label="Overall attendance"
+                    aria-valuenow={attendance.overall.percentage ?? 0}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                  />
+                </div>
               </div>
-            )}
-          </div>
 
-          <div className="text-xs text-[hsl(var(--muted-foreground))] bg-[hsl(var(--background))] border rounded p-3">
-            <strong>Note on Session Records:</strong> Class attendance sessions are recorded directly by faculty instructors during lecture hours. If any session discrepancy is observed, contact your respective subject faculty or department HOD within 48 hours.
-          </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))] mb-2">
+                  Subjects ({subjectRows.length})
+                </p>
+                {subjectRows.length === 0 ? (
+                  <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                    No subjects in your timetable or attendance records yet.
+                  </p>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {subjectRows.map(({ subject, summary }) => (
+                      <div
+                        key={subject.id}
+                        className="rounded-[var(--radius)] border p-3 bg-[hsl(var(--background))] space-y-1"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-bold text-[hsl(var(--primary))] uppercase tracking-wider">
+                            {subject.code}
+                          </p>
+                          {summary && (
+                            <p className={`text-sm font-bold ${attendanceColor(summary)}`}>{formatAttendance(summary)}</p>
+                          )}
+                        </div>
+                        <p className="text-sm font-medium leading-tight">{subject.name}</p>
+                        <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
+                          {summary && summary.counted > 0
+                            ? `${summary.attended} of ${summary.counted} classes attended`
+                            : 'No classes recorded yet'}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
 

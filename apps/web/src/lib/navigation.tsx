@@ -98,6 +98,7 @@ export const ROLE_NAVIGATION: Record<CanonicalRole, NavItem[]> = {
   ],
   STUDENT: [
     { label: 'My Dashboard', href: '/dashboard/student', icon: 'dashboard', exact: true },
+    { label: 'Attendance', href: '/dashboard/student/attendance', icon: 'attendance' },
     { label: 'Timetable', href: '/dashboard/timetable', icon: 'timetable' },
     { label: 'Assignments', href: '/dashboard/assignments', icon: 'assignments' },
     { label: 'Exams', href: '/dashboard/exams', icon: 'exams' },
@@ -125,6 +126,7 @@ export function isRouteAllowedForRole(pathname: string, role: CanonicalRole): bo
   // Specific restrictions for STUDENT
   if (role === 'STUDENT') {
     if (clean === '/dashboard/student') return true;
+    if (clean === '/dashboard/student/attendance') return true;
     if (clean.startsWith('/dashboard/timetable') && clean !== '/dashboard/timetable/new') return true;
     if (clean.startsWith('/dashboard/assignments') && clean !== '/dashboard/assignments/new') return true;
     if (clean === '/dashboard/exams/me') return true;
@@ -142,7 +144,7 @@ export function isRouteAllowedForRole(pathname: string, role: CanonicalRole): bo
 
   // Specific restrictions for FACULTY
   if (role === 'FACULTY') {
-    if (clean === '/dashboard/student') return false;
+    if (clean === '/dashboard/student' || clean.startsWith('/dashboard/student/')) return false;
     if (clean === '/dashboard/hod-overview') return false;
     if (clean === '/dashboard/institutional-overview') return false;
     if (clean === '/dashboard/faculty-performance') return false;
@@ -157,7 +159,7 @@ export function isRouteAllowedForRole(pathname: string, role: CanonicalRole): bo
 
   // Specific restrictions for HOD
   if (role === 'HOD') {
-    if (clean === '/dashboard/student') return false;
+    if (clean === '/dashboard/student' || clean.startsWith('/dashboard/student/')) return false;
     if (clean === '/dashboard/institutional-overview') return false;
     if (clean === '/dashboard/faculty-performance') return false;
     if (clean === '/foundation') return false;

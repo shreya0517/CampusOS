@@ -20,3 +20,11 @@ export const createAttendance = (input: { classId: string; heldOn: string; recor
   authenticatedRequest('/attendance', { method: 'POST', body: JSON.stringify(input) });
 export const updateAttendance = (id: string, input: { records: { studentId: string; status: AttendanceStatus; note?: string }[] }): Promise<AttendanceSession> =>
   authenticatedRequest(`/attendance/${id}`, { method: 'PUT', body: JSON.stringify(input) });
+
+export type AttendanceSummary = { present: number; absent: number; late: number; excused: number; attended: number; counted: number; percentage: number | null; belowThreshold: boolean };
+export type MySubjectAttendance = AttendanceSummary & { subject: ClassSubject; faculty: { firstName: string; lastName: string } | null };
+export type MyAttendanceDay = AttendanceSummary & { date: string };
+export type MyAttendanceRecord = { id: string; status: AttendanceStatus; note: string | null; heldOn: string; subject: ClassSubject };
+export type MyAttendance = { threshold: number; overall: AttendanceSummary; subjects: MySubjectAttendance[]; days: MyAttendanceDay[]; records: List<MyAttendanceRecord> };
+
+export const getMyAttendance = (q: URLSearchParams = new URLSearchParams()): Promise<MyAttendance> => authenticatedRequest(`/attendance/me?${q}`);

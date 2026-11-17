@@ -4,7 +4,7 @@ import { AuthorizationGuard } from '../authorization/authorization.guard';
 import { CurrentAuthorization, RequireRoles } from '../authorization/authorization.decorator';
 import type { AuthorizationContext } from '../authorization/authorization.types';
 import { AttendanceService } from './attendance.service';
-import { parseAttendanceListQuery, parseClassListQuery, parseCreateAttendanceDto, parseUpdateAttendanceDto } from './attendance.dto';
+import { parseAttendanceListQuery, parseClassListQuery, parseCreateAttendanceDto, parseMyAttendanceQuery, parseUpdateAttendanceDto } from './attendance.dto';
 
 @Controller()
 @UseGuards(AccessAuthGuard, AuthorizationGuard)
@@ -27,6 +27,12 @@ export class AttendanceController {
   @RequireRoles('ADMIN', 'HOD', 'FACULTY')
   list(@Query() q: unknown, @CurrentAuthorization() c: AuthorizationContext) {
     return this.attendance.listAttendance(parseAttendanceListQuery(q), c);
+  }
+
+  @Get('attendance/me')
+  @RequireRoles('STUDENT')
+  me(@Query() q: unknown, @CurrentAuthorization() c: AuthorizationContext) {
+    return this.attendance.getMyAttendance(parseMyAttendanceQuery(q), c);
   }
 
   @Get('attendance/:id')
