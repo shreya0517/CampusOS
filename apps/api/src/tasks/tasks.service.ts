@@ -354,16 +354,18 @@ export class TasksService {
     return { items, total, page: 1, pageSize: total || 50 };
   }
 
-  async getMyAssignmentStats(context: AuthorizationContext): Promise<unknown> {
-    const statuses = Object.values(TaskStatus);
-    const counts = await Promise.all(
-      statuses.map((status) =>
-        this.database.taskAssignment.count({
-          where: { collegeId: context.collegeId, assigneeUserId: context.userId, status },
-        }),
-      ),
-    );
-    return Object.fromEntries(statuses.map((status, i) => [status, counts[i]]));
+  /** Counts of the caller's own task assignments, in the shape the dashboards read (camelCase keys plus a total). */
+  async getMyAssignmentStats(context: AuthorizationContext): Promise<{ pending: number; inProgress: number; submitted: number; approved: number; rework: number; total: number }> {
+    const count = (status: TaskStatus): Promise<number> =>
+      this.database.taskAssignment.count({ where: { collegeId: context.collegeId, assigneeUserId: context.userId, status } });
+    const [pending, inProgress, submitted, approved, rework] = await Promise.all([
+      count(TaskStatus.PENDING),
+      count(TaskStatus.IN_PROGRESS),
+      count(TaskStatus.SUBMITTED),
+      count(TaskStatus.APPROVED),
+      count(TaskStatus.REWORK),
+    ]);
+    return { pending, inProgress, submitted, approved, rework, total: pending + inProgress + submitted + approved + rework };
   }
 
   /* ─── Event payload builder ──────────────────────────────────────────── */

@@ -18,7 +18,8 @@ import {
   type TaskStats,
 } from '@/lib/tasks-api';
 import { getMyTimetable, type TimetableEntry } from '@/lib/timetable-api';
-import { listClasses, listAttendance, type ClassRecord, type AttendanceSession } from '@/lib/attendance-api';
+import { listClasses, listAttendance, listMyClasses, type ClassRecord, type AttendanceSession, type MyClass } from '@/lib/attendance-api';
+import { AUDIENCE_LABEL, listAnnouncements, type Announcement } from '@/lib/announcements-api';
 import { listAssignments, type Assignment } from '@/lib/assignments-api';
 import { listExams, type Exam } from '@/lib/exams-api';
 import { Dialog } from '@/components/ui/interactive';
@@ -437,6 +438,9 @@ function FacultyDashboard() {
   const [attendance, setAttendance] = useState<AttendanceSession[]>([]);
   const [coursework, setCoursework] = useState<Assignment[]>([]);
   const [exams, setExams] = useState<Exam[]>([]);
+  const [myClasses, setMyClasses] = useState<MyClass[] | null>(null);
+  const [todaysSessions, setTodaysSessions] = useState<AttendanceSession[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[] | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Work submission dialog
@@ -449,7 +453,9 @@ function FacultyDashboard() {
 
   const loadData = async () => {
     try {
-      const [facRes, statsRes, myAssignRes, ttRes, classRes, attRes, assignRes, examRes] = await Promise.all([
+      // Today in the user's time zone, to find classes on today's timetable that still need attendance.
+      const today = new Date().toLocaleDateString('en-CA');
+      const [facRes, statsRes, myAssignRes, ttRes, classRes, attRes, assignRes, examRes, myClassesRes, todayRes, annRes] = await Promise.all([
         getMyFaculty().catch(() => null),
         getMyAssignmentStats().catch(() => null),
         listMyAssignments(new URLSearchParams({ page: '1', pageSize: '10' })).catch(() => ({ items: [] as TaskAssignment[], total: 0, page: 1, pageSize: 10 })),
@@ -458,6 +464,9 @@ function FacultyDashboard() {
         listAttendance(new URLSearchParams({ page: '1', pageSize: '5' })).catch(() => ({ items: [] as AttendanceSession[], total: 0, page: 1, pageSize: 5 })),
         listAssignments(new URLSearchParams({ page: '1', pageSize: '5' })).catch(() => ({ items: [] as Assignment[], total: 0, page: 1, pageSize: 5 })),
         listExams(new URLSearchParams({ page: '1', pageSize: '5' })).catch(() => ({ items: [] as Exam[], total: 0, page: 1, pageSize: 5 })),
+        listMyClasses().catch(() => null),
+        listAttendance(new URLSearchParams({ from: today, to: today, page: '1', pageSize: '100' })).catch(() => ({ items: [] as AttendanceSession[], total: 0, page: 1, pageSize: 100 })),
+        listAnnouncements(new URLSearchParams({ pageSize: '3' })).catch(() => null),
       ]);
 
       setFaculty(facRes);
@@ -468,6 +477,9 @@ function FacultyDashboard() {
       setAttendance(attRes.items);
       setCoursework(assignRes.items);
       setExams(examRes.items);
+      setMyClasses(myClassesRes);
+      setTodaysSessions(todayRes.items);
+      setAnnouncements(annRes ? annRes.items : null);
     } catch {
       // Fallback
     } finally {
@@ -541,6 +553,13 @@ function FacultyDashboard() {
 
   const todayDay = new Date().getDay();
   const todayClasses = timetable.filter((t) => t.dayOfWeek === todayDay);
+  // A class on today's timetable is pending until a session exists for it today.
+  const markedToday = new Set(todaysSessions.map((session) => session.classId));
+  const attendancePending = new Set(todayClasses.map((entry) => entry.classId).filter((classId) => !markedToday.has(classId))).size;
+  // Two subjects taught to the same section share its students, so each section is counted once.
+  const studentsTaught = myClasses ? [...new Map(myClasses.map((cls) => [cls.sectionId, cls.studentCount])).values()].reduce((sum, n) => sum + n, 0) : null;
+  const toEvaluate = myClasses ? myClasses.reduce((sum, cls) => sum + cls.pendingEvaluations, 0) : null;
+  const activeAssignments = myClasses ? myClasses.reduce((sum, cls) => sum + cls.assignmentCount, 0) : coursework.length;
   const todayDateString = new Date().toLocaleDateString('en-IN', {
     weekday: 'long',
     year: 'numeric',
@@ -612,13 +631,14 @@ function FacultyDashboard() {
           ))}
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          <StatCard label="Assigned Tasks" value={taskStats?.total ?? assignments.length} href="/dashboard/tasks" />
-          <StatCard label="Pending Tasks" value={taskStats?.pending ?? 0} href="/dashboard/tasks" />
-          <StatCard label="Approved Tasks" value={taskStats?.approved ?? 0} href="/dashboard/tasks" />
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
           <StatCard label="Today's Classes" value={todayClasses.length} href="/dashboard/timetable" />
-          <StatCard label="Teaching Classes" value={classes.length} href="/dashboard/classes" />
-          <StatCard label="Active Coursework" value={coursework.length} href="/dashboard/assignments" />
+          <StatCard label="Attendance Pending" value={attendancePending} sub={attendancePending > 0 ? 'Not marked today' : 'All marked'} href="/dashboard/attendance/new" />
+          <StatCard label="Teaching Classes" value={myClasses?.length ?? classes.length} href="/dashboard/classes" />
+          <StatCard label="Students" value={studentsTaught ?? '—'} sub="In your classes" href="/dashboard/classes" />
+          <StatCard label="Active Assignments" value={activeAssignments} href="/dashboard/assignments" />
+          <StatCard label="To Evaluate" value={toEvaluate ?? '—'} sub="Submissions awaiting marks" href="/dashboard/classes" />
+          <StatCard label="Pending Tasks" value={taskStats?.pending ?? 0} href="/dashboard/tasks" />
         </div>
       )}
 
@@ -1059,36 +1079,41 @@ function FacultyDashboard() {
         </Card>
       </div>
 
-      {/* G. Institutional & Departmental Announcements */}
+      {/* G. Announcements */}
       <Card>
         <CardHeader>
-          <CardTitle>Academic Notices &amp; Reminders</CardTitle>
-          <CardDescription>Important institutional guidelines and deadline schedules.</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Announcements</CardTitle>
+              <CardDescription>Latest notices from your college.</CardDescription>
+            </div>
+            <Link href="/dashboard/announcements" className="text-xs font-semibold text-[hsl(var(--primary))] underline underline-offset-4">
+              All Announcements →
+            </Link>
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-[var(--radius)] border p-4 bg-[hsl(var(--background))] space-y-1">
-              <p className="text-xs font-bold uppercase tracking-wider text-[hsl(var(--primary))]">Attendance Policy</p>
-              <p className="text-sm font-semibold">24-Hour Logging Window</p>
-              <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                Ensure class attendance sessions are fully recorded and validated within 24 hours of scheduled completion.
-              </p>
+          {announcements === null ? (
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">Announcements could not be loaded right now.</p>
+          ) : announcements.length === 0 ? (
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">No announcements yet.</p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-3">
+              {announcements.map((item) => (
+                <Link
+                  key={item.id}
+                  href="/dashboard/announcements"
+                  className="rounded-[var(--radius)] border p-4 bg-[hsl(var(--background))] space-y-1 transition-colors hover:border-[hsl(var(--primary))]/50"
+                >
+                  <p className="text-xs font-bold uppercase tracking-wider text-[hsl(var(--primary))]">
+                    {AUDIENCE_LABEL[item.audience]} · {new Date(item.publishedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                  </p>
+                  <p className="text-sm font-semibold">{item.title}</p>
+                  <p className="line-clamp-3 text-xs text-[hsl(var(--muted-foreground))]">{item.body}</p>
+                </Link>
+              ))}
             </div>
-            <div className="rounded-[var(--radius)] border p-4 bg-[hsl(var(--background))] space-y-1">
-              <p className="text-xs font-bold uppercase tracking-wider text-[hsl(var(--primary))]">Coursework Evaluation</p>
-              <p className="text-sm font-semibold">Assignment Submissions</p>
-              <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                Provide feedback and grade student submissions before the end of the continuous evaluation cycle.
-              </p>
-            </div>
-            <div className="rounded-[var(--radius)] border p-4 bg-[hsl(var(--background))] space-y-1">
-              <p className="text-xs font-bold uppercase tracking-wider text-[hsl(var(--primary))]">Examinations</p>
-              <p className="text-sm font-semibold">Marks Entry Schedules</p>
-              <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                Review subject schedules under Examinations and submit marks promptly following paper assessment.
-              </p>
-            </div>
-          </div>
+          )}
         </CardContent>
       </Card>
 
