@@ -107,3 +107,9 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
   - Response: { threshold, overall, subjects[], days[], records: { items[], total, page, pageSize } }. `overall`, each subject and each day carry { present, absent, late, excused, attended, counted, percentage, belowThreshold }.
   - LATE counts as attended. EXCUSED is left out of the percentage. `percentage` is null when nothing has been counted yet. `threshold` is 75.
   - Other roles get 403 FORBIDDEN. A STUDENT user without a linked student profile gets 404 STUDENT_NOT_FOUND. Invalid or impossible dates (for example 2026-02-31) return 400 INVALID_INPUT.
+
+## Announcements
+
+- GET /api/v1/announcements: any signed-in user. Returns published, unexpired announcements in the caller's college, newest first, with the author's id and display name. Query: search? (title or body), page (default 1), pageSize (default 10, max 50).
+  - Audience rules: STUDENT sees ALL and STUDENTS; FACULTY and HOD see ALL, FACULTY and STAFF; ADMIN sees every audience.
+- POST /api/v1/announcements: ADMIN only. Body: { title (3-160 chars), body (1-5000 chars), audience? (ALL, STUDENTS, FACULTY or STAFF; default ALL), publishedAt?, expiresAt? }. The college and author come from the access token. publishedAt defaults to now; expiresAt must be after it.

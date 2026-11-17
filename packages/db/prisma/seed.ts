@@ -1,4 +1,4 @@
-import { EnrollmentStatus, PrismaClient, UserStatus } from '@prisma/client';
+import { AnnouncementAudience, EnrollmentStatus, PrismaClient, UserStatus } from '@prisma/client';
 import { randomBytes, scrypt as scryptCallback } from 'node:crypto';
 import { promisify } from 'node:util';
 
@@ -50,7 +50,14 @@ async function main(): Promise<void> {
     await prisma.enrollment.upsert({ where: { collegeId_studentId_sectionId: { collegeId: college.id, studentId: profile.id, sectionId } }, update: { status: EnrollmentStatus.ACTIVE }, create: { collegeId: college.id, studentId: profile.id, sectionId, status: EnrollmentStatus.ACTIVE } });
     return profile;
   }));
-  console.info(`Seeded ${college.code}: ${admin.email}, ${department.code}, ${course.code}, ${students.length} students.`);
+  // Fixed ids keep the sample announcements idempotent across seed runs.
+  const announcements = [
+    { id: 'seed-announcement-welcome', audience: AnnouncementAudience.ALL, title: 'Welcome to the new semester', body: 'Classes for all departments begin on Monday. Check your timetable for rooms and timings.' },
+    { id: 'seed-announcement-attendance', audience: AnnouncementAudience.STUDENTS, title: 'Attendance reminder', body: 'You need at least 75% attendance in every subject to sit the end-semester examinations. Check your Attendance page regularly.' },
+    { id: 'seed-announcement-faculty-meeting', audience: AnnouncementAudience.FACULTY, title: 'Faculty meeting on Friday', body: 'All faculty members are requested to attend the academic planning meeting at 3 PM in the conference room.' },
+  ];
+  await Promise.all(announcements.map((announcement) => prisma.announcement.upsert({ where: { id: announcement.id }, update: { title: announcement.title, body: announcement.body, audience: announcement.audience }, create: { ...announcement, collegeId: college.id, authorId: admin.id, publishedAt: new Date() } })));
+  console.info(`Seeded ${college.code}: ${admin.email}, ${department.code}, ${course.code}, ${students.length} students, ${announcements.length} announcements.`);
 }
 
 main().catch((error: unknown) => { console.error(error); process.exitCode = 1; }).finally(async () => { await prisma.$disconnect(); });
