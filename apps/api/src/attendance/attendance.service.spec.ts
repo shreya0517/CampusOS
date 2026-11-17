@@ -2,7 +2,7 @@ import { ConflictException, ForbiddenException, NotFoundException } from '@nestj
 import { AttendanceStatus } from '@prisma/client';
 import { AttendanceService } from './attendance.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
-import { parseAttendanceListQuery, parseClassListQuery, parseCreateAttendanceDto, parseUpdateAttendanceDto } from './attendance.dto';
+import { parseAttendanceListQuery, parseClassListQuery, parseCreateAttendanceDto, parseMyAttendanceQuery, parseUpdateAttendanceDto } from './attendance.dto';
 
 const admin: AuthorizationContext = { userId: 'admin', collegeId: 'col-a', roles: ['ADMIN'], permissions: [], departmentId: null };
 const hod: AuthorizationContext = { userId: 'hod', collegeId: 'col-a', roles: ['HOD'], permissions: [], departmentId: 'dept-a' };
@@ -17,7 +17,8 @@ describe('AttendanceService', () => {
   const database = {
     class: { findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn() },
     attendance: { create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn() },
-    attendanceRecord: { deleteMany: jest.fn(), createMany: jest.fn() },
+    attendanceRecord: { deleteMany: jest.fn(), createMany: jest.fn(), findMany: jest.fn() },
+    student: { findFirst: jest.fn() },
     $transaction: jest.fn((fn: (txObj: typeof tx) => Promise<void>) => fn(tx)),
   };
   const service = new AttendanceService(database as never);
@@ -82,5 +83,86 @@ describe('AttendanceService', () => {
     await service.updateAttendance('att-a', { records: [{ studentId: 'stu-a', status: AttendanceStatus.ABSENT }] }, admin);
     expect(tx.attendanceRecord.deleteMany).toHaveBeenCalledWith({ where: { collegeId: 'col-a', attendanceId: 'att-a' } });
     expect(tx.attendanceRecord.createMany).toHaveBeenCalled();
+  });
+
+  describe('getMyAttendance', () => {
+    const os = { id: 'subj-os', code: 'CS301', name: 'Operating Systems' };
+    const dbms = { id: 'subj-db', code: 'CS302', name: 'DBMS' };
+    const record = (id: string, status: AttendanceStatus, heldOn: string, subject = os) => ({
+      id, status, note: null, attendance: { heldOn: new Date(heldOn), class: { subject, faculty: { firstName: 'Priya', lastName: 'Sharma' } } },
+    });
+    const query = { page: 1, pageSize: 20 };
+
+    it('allows only students', async () => {
+      await expect(service.getMyAttendance(query, faculty)).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(service.getMyAttendance(query, admin)).rejects.toBeInstanceOf(ForbiddenException);
+      expect(database.attendanceRecord.findMany).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 when the user has no student profile', async () => {
+      database.student.findFirst.mockResolvedValue(null);
+      await expect(service.getMyAttendance(query, student)).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('reads only the signed-in student records in their college', async () => {
+      database.student.findFirst.mockResolvedValue({ id: 'stu-a' });
+      database.attendanceRecord.findMany.mockResolvedValue([]);
+      await service.getMyAttendance(query, student);
+      expect(database.student.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { collegeId: 'col-a', userId: 'stu' } }));
+      expect(database.attendanceRecord.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { collegeId: 'col-a', studentId: 'stu-a' } }));
+    });
+
+    it('reports no percentage instead of a made-up one when nothing is recorded', async () => {
+      database.student.findFirst.mockResolvedValue({ id: 'stu-a' });
+      database.attendanceRecord.findMany.mockResolvedValue([]);
+      const result = await service.getMyAttendance(query, student);
+      expect(result.overall).toMatchObject({ counted: 0, percentage: null, belowThreshold: false });
+      expect(result.subjects).toEqual([]);
+    });
+
+    it('counts late as attended, leaves excused out, and flags subjects under 75%', async () => {
+      database.student.findFirst.mockResolvedValue({ id: 'stu-a' });
+      database.attendanceRecord.findMany.mockResolvedValue([
+        record('r1', AttendanceStatus.PRESENT, '2026-09-04'),
+        record('r2', AttendanceStatus.LATE, '2026-09-03'),
+        record('r3', AttendanceStatus.ABSENT, '2026-09-02'),
+        record('r4', AttendanceStatus.EXCUSED, '2026-09-01'),
+        record('r5', AttendanceStatus.PRESENT, '2026-09-04', dbms),
+        record('r6', AttendanceStatus.ABSENT, '2026-09-03', dbms),
+      ]);
+      const result = await service.getMyAttendance(query, student);
+      expect(result.threshold).toBe(75);
+      expect(result.overall).toMatchObject({ present: 2, late: 1, absent: 2, excused: 1, attended: 3, counted: 5, percentage: 60, belowThreshold: true });
+      expect(result.subjects.map((s) => [s.subject.code, s.percentage, s.belowThreshold])).toEqual([['CS302', 50, true], ['CS301', 66.7, true]]);
+    });
+
+    it('filters history and calendar days by subject and date range but keeps the full summary', async () => {
+      database.student.findFirst.mockResolvedValue({ id: 'stu-a' });
+      database.attendanceRecord.findMany.mockResolvedValue([
+        record('r1', AttendanceStatus.PRESENT, '2026-10-02'),
+        record('r2', AttendanceStatus.ABSENT, '2026-09-30'),
+        record('r3', AttendanceStatus.PRESENT, '2026-10-01', dbms),
+      ]);
+      const result = await service.getMyAttendance({ ...query, subjectId: 'subj-os', from: '2026-10-01', to: '2026-10-31' }, student);
+      expect(result.records.items.map((item) => item.id)).toEqual(['r1']);
+      expect(result.records.total).toBe(1);
+      expect(result.days).toEqual([expect.objectContaining({ date: '2026-10-02', present: 1 })]);
+      expect(result.overall.counted).toBe(3);
+    });
+
+    it('paginates history', async () => {
+      database.student.findFirst.mockResolvedValue({ id: 'stu-a' });
+      database.attendanceRecord.findMany.mockResolvedValue([1, 2, 3].map((n) => record(`r${n}`, AttendanceStatus.PRESENT, `2026-09-0${n}`)));
+      const result = await service.getMyAttendance({ page: 2, pageSize: 2 }, student);
+      expect(result.records).toMatchObject({ total: 3, page: 2, pageSize: 2 });
+      expect(result.records.items.map((item) => item.id)).toEqual(['r3']);
+    });
+
+    it('rejects bad query values', () => {
+      expect(() => parseMyAttendanceQuery({ from: '2026-13-45' })).toThrow();
+      expect(() => parseMyAttendanceQuery({ from: '01/10/2026' })).toThrow();
+      expect(() => parseMyAttendanceQuery({ from: '2026-10-31', to: '2026-10-01' })).toThrow();
+      expect(parseMyAttendanceQuery({ subjectId: 'subj-os', from: '2026-10-01', to: '2026-10-31' })).toEqual({ subjectId: 'subj-os', from: '2026-10-01', to: '2026-10-31', page: 1, pageSize: 20 });
+    });
   });
 });

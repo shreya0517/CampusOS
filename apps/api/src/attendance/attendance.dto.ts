@@ -6,6 +6,7 @@ export type CreateAttendanceDto = { classId: string; heldOn: string; records: At
 export type UpdateAttendanceDto = { records: AttendanceRecordInput[] };
 export type AttendanceListQuery = { classId?: string; from?: string; to?: string; page: number; pageSize: number };
 export type ClassListQuery = { departmentId?: string; sectionId?: string; page: number; pageSize: number };
+export type MyAttendanceQuery = { subjectId?: string; from?: string; to?: string; page: number; pageSize: number };
 
 type Body = Record<string, unknown>;
 const invalid = (): never => { throw new BadRequestException({ code: 'INVALID_INPUT', message: 'Request input is invalid.' }); };
@@ -42,6 +43,20 @@ export const parseUpdateAttendanceDto = (v: unknown): UpdateAttendanceDto => {
 export const parseAttendanceListQuery = (v: unknown): AttendanceListQuery => {
   const q = object(v);
   return { classId: optionalString(q.classId), from: optionalString(q.from), to: optionalString(q.to), page: integer(q.page, 1, 10_000), pageSize: integer(q.pageSize, 20, 100) };
+};
+
+const optionalDate = (v: unknown): string | undefined => {
+  const s = optionalString(v);
+  if (s !== undefined && (!/^\d{4}-\d{2}-\d{2}$/.test(s) || Number.isNaN(Date.parse(s)))) invalid();
+  return s;
+};
+
+export const parseMyAttendanceQuery = (v: unknown): MyAttendanceQuery => {
+  const q = object(v);
+  const from = optionalDate(q.from);
+  const to = optionalDate(q.to);
+  if (from && to && from > to) invalid();
+  return { subjectId: optionalString(q.subjectId), from, to, page: integer(q.page, 1, 10_000), pageSize: integer(q.pageSize, 20, 100) };
 };
 
 export const parseClassListQuery = (v: unknown): ClassListQuery => {
