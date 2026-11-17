@@ -124,7 +124,9 @@ export default function FeesPage() {
           <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Finance</p>
           <h1 className="mt-1 text-3xl font-semibold">Fees & Online Payments</h1>
           <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-            Manage fee structures, issue student billing invoices, and accept online Razorpay payments with digital receipts.
+            {isStudent
+              ? 'Your invoices, payments and receipts.'
+              : 'Manage fee structures, issue student billing invoices, and accept online Razorpay payments with digital receipts.'}
           </p>
         </div>
         {isStaff && (
@@ -233,7 +235,9 @@ export default function FeesPage() {
           ) : error ? (
             <ErrorState message={error} onRetry={() => void loadData()} />
           ) : activeTab === 'invoices' ? (
-            invoices.length === 0 ? (
+            <>
+            {isStudent && invoices.length > 0 && <StudentFeeSummary invoices={invoices} />}
+            {invoices.length === 0 ? (
               <EmptyState
                 title="No invoices found"
                 description={
@@ -305,7 +309,8 @@ export default function FeesPage() {
                   </Card>
                 ))}
               </div>
-            )
+            )}
+            </>
           ) : activeTab === 'structures' ? (
             structures.length === 0 ? (
               <EmptyState
@@ -392,6 +397,39 @@ export default function FeesPage() {
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+/** Totals across the student's own invoices, so the balance is visible before scrolling through them. */
+function StudentFeeSummary({ invoices }: { invoices: Invoice[] }) {
+  const billable = invoices.filter((invoice) => invoice.status !== 'VOID' && invoice.status !== 'DRAFT');
+  const billed = billable.reduce((sum, invoice) => sum + Number(invoice.amountDue), 0);
+  // A completed payment settles its invoice in full; amountDue stays the invoice total.
+  const paid = billable.flatMap((invoice) => invoice.payments ?? []).filter((payment) => payment.status === 'COMPLETED').reduce((sum, payment) => sum + Number(payment.amount), 0);
+  const outstanding = billable.filter((invoice) => invoice.status !== 'PAID').reduce((sum, invoice) => sum + Number(invoice.amountDue), 0);
+  const nextDue = billable
+    .filter((invoice) => invoice.status !== 'PAID' && invoice.dueOn)
+    .map((invoice) => invoice.dueOn as string)
+    .sort()[0];
+  const rupees = (value: number): string => '₹' + value.toLocaleString('en-IN');
+  return (
+    <div className="mb-4 grid gap-3 sm:grid-cols-3">
+      <div className="rounded-[var(--radius)] border p-4">
+        <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))]">Total billed</p>
+        <p className="mt-1 text-2xl font-bold tabular-nums">{rupees(billed)}</p>
+      </div>
+      <div className="rounded-[var(--radius)] border p-4">
+        <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))]">Paid</p>
+        <p className="mt-1 text-2xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">{rupees(paid)}</p>
+      </div>
+      <div className="rounded-[var(--radius)] border p-4">
+        <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))]">Outstanding</p>
+        <p className={'mt-1 text-2xl font-bold tabular-nums ' + (outstanding > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400')}>{rupees(outstanding)}</p>
+        {nextDue && outstanding > 0 && (
+          <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">Next due {new Date(nextDue).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}</p>
+        )}
+      </div>
     </div>
   );
 }

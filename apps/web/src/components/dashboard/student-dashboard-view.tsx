@@ -233,7 +233,7 @@ export function StudentDashboardView() {
   );
   const totalPaid = invoices
     .flatMap((i) => i.payments || [])
-    .filter((p) => p.status === 'SUCCESS' || p.status === 'PAID')
+    .filter((p) => p.status === 'COMPLETED')
     .reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
 
   const avgPercentage =
