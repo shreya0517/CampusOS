@@ -3,7 +3,7 @@ import { createHmac, randomBytes, scrypt as scryptCallback, timingSafeEqual } fr
 import { promisify } from 'node:util';
 import { DatabaseService } from '../database.service';
 import { getAuthConfig } from './auth.config';
-import type { ForgotPasswordDto, LoginDto, RegisterDto, ResetPasswordDto } from './auth.dto';
+import type { ChangePasswordDto, ForgotPasswordDto, LoginDto, RegisterDto, ResetPasswordDto } from './auth.dto';
 
 const scrypt = promisify(scryptCallback);
 const genericCredentialsError = new UnauthorizedException({ code: 'INVALID_CREDENTIALS', message: 'Invalid credentials.' });
@@ -102,6 +102,22 @@ export class AuthService {
       if (consumption.count !== 1) throw new BadRequestException({ code: 'INVALID_RESET', message: 'Reset link or password is invalid.' });
       await transaction.user.update({ where: { collegeId_id: { collegeId: record.collegeId, id: record.userId } }, data: { passwordHash } });
       await transaction.authSession.updateMany({ where: { collegeId: record.collegeId, userId: record.userId, revokedAt: null }, data: { revokedAt: new Date() } });
+    });
+  }
+
+  /**
+   * Changes the signed-in user's password and signs out every other session, keeping the one making
+   * the request. A wrong current password is a 400, not a 401, so clients don't treat it as an expired session.
+   */
+  async changePassword(accessToken: string, input: ChangePasswordDto): Promise<void> {
+    const payload = this.verifyAccessToken(accessToken);
+    const user = await this.database.user.findUnique({ where: { collegeId_id: { collegeId: payload.collegeId, id: payload.sub } } });
+    if (!user?.passwordHash || !(await verifyPassword(input.currentPassword, user.passwordHash))) throw new BadRequestException({ code: 'INVALID_CURRENT_PASSWORD', message: 'Current password is incorrect.' });
+    if (!isStrongPassword(input.newPassword) || input.newPassword === input.currentPassword) throw new BadRequestException({ code: 'INVALID_NEW_PASSWORD', message: 'Choose a new password of at least 12 characters that is different from the current one.' });
+    const passwordHash = await hashPassword(input.newPassword);
+    await this.database.$transaction(async (transaction) => {
+      await transaction.user.update({ where: { collegeId_id: { collegeId: payload.collegeId, id: payload.sub } }, data: { passwordHash } });
+      await transaction.authSession.updateMany({ where: { collegeId: payload.collegeId, userId: payload.sub, revokedAt: null, id: { not: payload.sid } }, data: { revokedAt: new Date() } });
     });
   }
 

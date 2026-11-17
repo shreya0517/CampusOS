@@ -3,7 +3,7 @@ import { parseCookies } from './auth.service';
 import { AuthService } from './auth.service';
 import type { PublicUser } from './auth.service';
 import { AccessAuthGuard, CurrentUser } from './access-auth.guard';
-import { parseForgotPasswordDto, parseLoginDto, parseRegisterDto, parseResetPasswordDto, parseTokenDto } from './auth.dto';
+import { parseChangePasswordDto, parseForgotPasswordDto, parseLoginDto, parseRegisterDto, parseResetPasswordDto, parseTokenDto } from './auth.dto';
 import { createRefreshCookie, getRefreshCookieName } from './refresh-cookie';
 
 type RequestLike = { headers: Record<string, string | undefined> };
@@ -20,4 +20,5 @@ export class AuthController {
   @Post('forgot-password') @HttpCode(204) async forgotPassword(@Body() body: unknown): Promise<void> { await this.auth.requestPasswordReset(parseForgotPasswordDto(body)); }
   @Post('reset-password') @HttpCode(204) async resetPassword(@Body() body: unknown): Promise<void> { await this.auth.resetPassword(parseResetPasswordDto(body)); }
   @Get('me') @UseGuards(AccessAuthGuard) me(@CurrentUser() user: PublicUser) { return { user }; }
+  @Post('change-password') @HttpCode(204) @UseGuards(AccessAuthGuard) async changePassword(@Req() request: RequestLike, @Body() body: unknown): Promise<void> { await this.auth.changePassword(request.headers.authorization?.match(/^Bearer (.+)$/)?.[1] ?? '', parseChangePasswordDto(body)); }
 }

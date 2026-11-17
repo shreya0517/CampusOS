@@ -4,6 +4,7 @@ export type RegisterDto = { collegeCode: string; email: string; password: string
 export type LoginDto = { collegeCode: string; email: string; password: string };
 export type ForgotPasswordDto = { collegeCode: string; email: string };
 export type ResetPasswordDto = { token: string; password: string };
+export type ChangePasswordDto = { currentPassword: string; newPassword: string };
 
 export const parseRegisterDto = (value: unknown): RegisterDto => {
   const body = object(value);
@@ -25,6 +26,11 @@ export const parseForgotPasswordDto = (value: unknown): ForgotPasswordDto => {
 export const parseResetPasswordDto = (value: unknown): ResetPasswordDto => {
   const body = object(value);
   return { token: string(body.token), password: string(body.password, 12) };
+};
+
+export const parseChangePasswordDto = (value: unknown): ChangePasswordDto => {
+  const body = object(value);
+  return { currentPassword: string(body.currentPassword), newPassword: string(body.newPassword) };
 };
 
 type Body = Record<string, unknown>;
