@@ -110,6 +110,8 @@ export async function createInvoice(input: {
   });
 }
 
+export const getPaymentMode = (): Promise<{ testMode: boolean; onlinePaymentsAvailable: boolean }> => authenticatedRequest('/fees/payment-mode');
+
 export async function createRazorpayOrder(invoiceId: string): Promise<RazorpayOrderResponse> {
   return authenticatedRequest<RazorpayOrderResponse>(`/fees/invoices/${invoiceId}/create-razorpay-order`, {
     method: 'POST',

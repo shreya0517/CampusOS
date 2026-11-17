@@ -134,4 +134,5 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 - POST /api/v1/fees/structures and POST /api/v1/fees/invoices: ADMIN only.
 - GET /api/v1/fees/structures, GET /api/v1/fees/invoices and GET /api/v1/fees/receipts: ADMIN (whole college) and STUDENT (only what applies to them). HOD and FACULTY get 403.
 - POST /api/v1/fees/invoices/:id/create-razorpay-order and POST /api/v1/fees/payments/verify-razorpay: STUDENT only, for their own invoices (404 otherwise). Orders include `testMode`.
+- GET /api/v1/fees/payment-mode: ADMIN and STUDENT. Returns { testMode, onlinePaymentsAvailable }. The web app has no Razorpay Checkout step yet, so it only offers payment when this says it can complete; this avoids creating pending payments that can never finish.
 - Signature checks: a real Razorpay signature is verified against `RAZORPAY_KEY_SECRET`. The simulated `test_sig_<paymentId>` signature is accepted only in test mode, meaning outside production with no secret configured. In production, both endpoints return 503 PAYMENTS_NOT_CONFIGURED until `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` are set.

@@ -290,3 +290,18 @@ describe('FeesService access and payment checks', () => {
     await expect(service.createInvoice(parseCreateInvoiceDto({ studentId: 'stu-1', amountDue: 1000 }), hod)).rejects.toBeInstanceOf(ForbiddenException);
   });
 });
+
+describe('FeesService payment mode', () => {
+  const env = { ...process.env };
+  afterEach(() => {
+    process.env = { ...env };
+  });
+
+  it('reports online payments as available only in test mode', () => {
+    const service = new FeesService({} as unknown as DatabaseService);
+    delete process.env.RAZORPAY_KEY_SECRET;
+    expect(service.getPaymentMode()).toEqual({ testMode: true, onlinePaymentsAvailable: true });
+    process.env.RAZORPAY_KEY_SECRET = 'real-secret';
+    expect(service.getPaymentMode()).toEqual({ testMode: false, onlinePaymentsAvailable: false });
+  });
+});

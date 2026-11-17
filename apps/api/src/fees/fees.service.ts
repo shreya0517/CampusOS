@@ -200,6 +200,15 @@ export class FeesService {
     });
   }
 
+  /**
+   * Whether the web app can take an online payment right now. There is no Razorpay Checkout step in the web app yet,
+   * so the only payment it can complete is the simulated one in test mode; it checks this before creating an order.
+   */
+  getPaymentMode(): { testMode: boolean; onlinePaymentsAvailable: boolean } {
+    const testMode = paymentsInTestMode();
+    return { testMode, onlinePaymentsAvailable: testMode };
+  }
+
   /** The signed-in student's own profile id; payments are only ever made against their own invoices. */
   private async ownStudentId(context: AuthorizationContext): Promise<string> {
     if (!context.roles.includes('STUDENT')) denied();

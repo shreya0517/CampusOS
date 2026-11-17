@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import {
   createRazorpayOrder,
   getMyInvoices,
+  getPaymentMode,
   getReceipts,
   listFeeStructures,
   listInvoices,
@@ -48,6 +49,12 @@ export default function FeesPage() {
   const [payingInvoice, setPayingInvoice] = useState<Invoice | null>(null);
   const [processingPayment, setProcessingPayment] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState<string | null>(null);
+  // Asked before any order is created, so a click never leaves a pending payment behind when checkout isn't available.
+  const [onlinePayments, setOnlinePayments] = useState<{ testMode: boolean; onlinePaymentsAvailable: boolean } | null>(null);
+
+  useEffect(() => {
+    if (isStudent) getPaymentMode().then(setOnlinePayments).catch(() => setOnlinePayments({ testMode: false, onlinePaymentsAvailable: false }));
+  }, [isStudent]);
 
   const loadData = async () => {
     setLoading(true);
@@ -294,15 +301,21 @@ export default function FeesPage() {
                         )}
                       </div>
 
-                      {inv.status !== 'PAID' ? (
+                      {inv.status !== 'PAID' && onlinePayments && !onlinePayments.onlinePaymentsAvailable ? (
+                        <p className="rounded bg-[hsl(var(--muted))] p-2 text-center text-xs text-[hsl(var(--muted-foreground))]">
+                          Online payment isn&apos;t available yet. Please pay at the accounts office.
+                        </p>
+                      ) : inv.status !== 'PAID' ? (
                         <Button
-                          disabled={processingPayment && payingInvoice?.id === inv.id}
+                          disabled={!onlinePayments || (processingPayment && payingInvoice?.id === inv.id)}
                           onClick={() => void handleInitiatePayment(inv)}
                           className="w-full text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
                         >
                           {processingPayment && payingInvoice?.id === inv.id
                             ? 'Verifying Razorpay...'
-                            : 'Pay Now via Razorpay'}
+                            : onlinePayments?.testMode
+                              ? 'Pay Now (test mode)'
+                              : 'Pay Now via Razorpay'}
                         </Button>
                       ) : (
                         <div className="rounded bg-green-50 p-2 text-center text-xs font-semibold text-green-800 dark:bg-green-950/40 dark:text-green-300">

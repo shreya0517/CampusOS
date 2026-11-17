@@ -50,6 +50,12 @@ export class FeesController {
     return this.service.getMyInvoices(context);
   }
 
+  @Get('payment-mode')
+  @RequireRoles('ADMIN', 'STUDENT')
+  getPaymentMode() {
+    return this.service.getPaymentMode();
+  }
+
   @Post('invoices/:id/create-razorpay-order')
   @RequireRoles('STUDENT')
   async createRazorpayOrder(
