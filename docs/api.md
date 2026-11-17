@@ -128,3 +128,10 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 
 - GET /api/v1/classes/mine: ADMIN, HOD and FACULTY. The classes the caller teaches, each with `studentCount` (active enrolment in the section), `sessionsHeld`, `assignmentCount`, `pendingEvaluations` (submissions SUBMITTED or LATE that still need marks) and `attendance` (the same summary shape as the student attendance endpoint).
 - GET /api/v1/classes/:id/overview: ADMIN, HOD and FACULTY, for a class they can open under the usual class scope (faculty: classes they teach; HOD: their department); otherwise 404. Returns { class, threshold, sessionsHeld, attendance, students[], assignments[] }: each student has their attendance in this class and how many of its assignments they submitted; each assignment has its submission count.
+
+## Fees Access
+
+- POST /api/v1/fees/structures and POST /api/v1/fees/invoices: ADMIN only.
+- GET /api/v1/fees/structures, GET /api/v1/fees/invoices and GET /api/v1/fees/receipts: ADMIN (whole college) and STUDENT (only what applies to them). HOD and FACULTY get 403.
+- POST /api/v1/fees/invoices/:id/create-razorpay-order and POST /api/v1/fees/payments/verify-razorpay: STUDENT only, for their own invoices (404 otherwise). Orders include `testMode`.
+- Signature checks: a real Razorpay signature is verified against `RAZORPAY_KEY_SECRET`. The simulated `test_sig_<paymentId>` signature is accepted only in test mode, meaning outside production with no secret configured. In production, both endpoints return 503 PAYMENTS_NOT_CONFIGURED until `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` are set.

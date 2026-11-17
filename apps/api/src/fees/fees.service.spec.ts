@@ -1,4 +1,5 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { createHmac } from 'node:crypto';
+import { BadRequestException, ForbiddenException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { InvoiceStatus, PaymentStatus } from '@prisma/client';
 import { FeesService } from './fees.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
@@ -91,6 +92,8 @@ describe('FeesService', () => {
   });
 
   describe('createRazorpayOrder', () => {
+    beforeEach(() => database.student.findFirst.mockResolvedValue({ id: 'stu-1' }));
+
     it('throws BadRequestException if invoice is already paid', async () => {
       database.invoice.findFirst.mockResolvedValue({
         id: 'inv-1',
@@ -129,6 +132,8 @@ describe('FeesService', () => {
   });
 
   describe('verifyRazorpayPayment', () => {
+    beforeEach(() => database.student.findFirst.mockResolvedValue({ id: 'stu-1' }));
+
     it('throws BadRequestException on invalid HMAC signature', async () => {
       database.payment.findFirst.mockResolvedValue({
         id: 'pay-1',
@@ -218,5 +223,70 @@ describe('FeesService fee structure visibility', () => {
     await service.listFeeStructures(admin);
     expect(structureWhere()).toEqual({ collegeId: 'col-a' });
     expect(database.student.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe('FeesService access and payment checks', () => {
+  const hod: AuthorizationContext = { userId: 'hod-1', collegeId: 'col-a', roles: ['HOD'], permissions: [], departmentId: 'dept-a' };
+  const database = {
+    student: { findFirst: jest.fn().mockResolvedValue({ id: 'stu-1' }) },
+    invoice: { findFirst: jest.fn(), update: jest.fn() },
+    payment: { create: jest.fn().mockResolvedValue({ id: 'pay-1' }), findFirst: jest.fn(), update: jest.fn() },
+    receipt: { findFirst: jest.fn(), create: jest.fn() },
+    feeStructure: { create: jest.fn() },
+    $transaction: jest.fn(),
+  };
+  database.$transaction.mockImplementation((fn: (tx: typeof database) => Promise<unknown>) => fn(database));
+  const service = new FeesService(database as unknown as DatabaseService);
+  const env = { ...process.env };
+  const dto = (signature: string) => parseVerifyRazorpayPaymentDto({ paymentId: 'pay-1', razorpayOrderId: 'order_1', razorpayPaymentId: 'pay_rzp_1', razorpaySignature: signature });
+
+  beforeEach(() => jest.clearAllMocks());
+  afterEach(() => {
+    process.env = { ...env };
+  });
+
+  it('only creates orders for the student\'s own invoice', async () => {
+    database.invoice.findFirst.mockResolvedValue(null);
+    await expect(service.createRazorpayOrder({ invoiceId: 'someone-elses' }, studentContext)).rejects.toBeInstanceOf(NotFoundException);
+    expect(database.invoice.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'someone-elses', collegeId: 'col-a', studentId: 'stu-1' } }));
+    expect(database.payment.create).not.toHaveBeenCalled();
+  });
+
+  it('only verifies payments on the student\'s own invoices', async () => {
+    database.payment.findFirst.mockResolvedValue(null);
+    await expect(service.verifyRazorpayPayment(dto('test_sig_pay_rzp_1'), studentContext)).rejects.toBeInstanceOf(NotFoundException);
+    expect(database.payment.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'pay-1', collegeId: 'col-a', invoice: { studentId: 'stu-1' } } }));
+  });
+
+  it('rejects the simulated signature once a real secret is configured, and accepts the real one', async () => {
+    process.env.RAZORPAY_KEY_SECRET = 'real-secret';
+    database.payment.findFirst.mockResolvedValue({ id: 'pay-1', invoiceId: 'inv-1', amount: 100, status: PaymentStatus.PENDING });
+    await expect(service.verifyRazorpayPayment(dto('test_sig_pay_rzp_1'), studentContext)).rejects.toBeInstanceOf(BadRequestException);
+    const real = createHmac('sha256', 'real-secret').update('order_1|pay_rzp_1').digest('hex');
+    database.receipt.findFirst.mockResolvedValue(null);
+    database.receipt.create.mockResolvedValue({ id: 'rec-1' });
+    await expect(service.verifyRazorpayPayment(dto(real), studentContext)).resolves.toMatchObject({ success: true });
+  });
+
+  it('refuses online payments in production without Razorpay keys', async () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.RAZORPAY_KEY_ID;
+    delete process.env.RAZORPAY_KEY_SECRET;
+    await expect(service.createRazorpayOrder({ invoiceId: 'inv-1' }, studentContext)).rejects.toBeInstanceOf(ServiceUnavailableException);
+    await expect(service.verifyRazorpayPayment(dto('test_sig_pay_rzp_1'), studentContext)).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(database.payment.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('marks orders as test mode only outside production without a secret', async () => {
+    database.invoice.findFirst.mockResolvedValue({ id: 'inv-1', status: InvoiceStatus.ISSUED, amountDue: 100, invoiceNumber: 'INV-1' });
+    await expect(service.createRazorpayOrder({ invoiceId: 'inv-1' }, studentContext)).resolves.toMatchObject({ testMode: true });
+    process.env.RAZORPAY_KEY_SECRET = 'real-secret';
+    await expect(service.createRazorpayOrder({ invoiceId: 'inv-1' }, studentContext)).resolves.toMatchObject({ testMode: false });
+  });
+
+  it('leaves fee structures and invoices to admins', async () => {
+    await expect(service.createFeeStructure(parseCreateFeeStructureDto({ name: 'Tuition', amount: 1000, activeFrom: '2026-07-01' }), hod)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.createInvoice(parseCreateInvoiceDto({ studentId: 'stu-1', amountDue: 1000 }), hod)).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

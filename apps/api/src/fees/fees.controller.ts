@@ -18,25 +18,27 @@ export class FeesController {
   constructor(@Inject(FeesService) private readonly service: FeesService) {}
 
   @Post('structures')
-  @RequireRoles('ADMIN', 'HOD')
+  @RequireRoles('ADMIN')
   async createFeeStructure(@Body() body: unknown, @CurrentAuthorization() context: AuthorizationContext) {
     const input = parseCreateFeeStructureDto(body);
     return this.service.createFeeStructure(input, context);
   }
 
   @Get('structures')
+  @RequireRoles('ADMIN', 'STUDENT')
   async listFeeStructures(@CurrentAuthorization() context: AuthorizationContext) {
     return this.service.listFeeStructures(context);
   }
 
   @Post('invoices')
-  @RequireRoles('ADMIN', 'HOD')
+  @RequireRoles('ADMIN')
   async createInvoice(@Body() body: unknown, @CurrentAuthorization() context: AuthorizationContext) {
     const input = parseCreateInvoiceDto(body);
     return this.service.createInvoice(input, context);
   }
 
   @Get('invoices')
+  @RequireRoles('ADMIN', 'STUDENT')
   async listInvoices(@Query() query: unknown, @CurrentAuthorization() context: AuthorizationContext) {
     const parsed = parseFeesListQuery(query);
     return this.service.listInvoices(parsed, context);
@@ -49,6 +51,7 @@ export class FeesController {
   }
 
   @Post('invoices/:id/create-razorpay-order')
+  @RequireRoles('STUDENT')
   async createRazorpayOrder(
     @Param('id') id: string,
     @Body() body: unknown,
@@ -60,12 +63,14 @@ export class FeesController {
   }
 
   @Post('payments/verify-razorpay')
+  @RequireRoles('STUDENT')
   async verifyRazorpayPayment(@Body() body: unknown, @CurrentAuthorization() context: AuthorizationContext) {
     const input = parseVerifyRazorpayPaymentDto(body);
     return this.service.verifyRazorpayPayment(input, context);
   }
 
   @Get('receipts')
+  @RequireRoles('ADMIN', 'STUDENT')
   async getReceipts(@CurrentAuthorization() context: AuthorizationContext) {
     return this.service.getReceipts(context);
   }
