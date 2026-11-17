@@ -348,10 +348,10 @@ type MyRecord = {
   note: string | null;
   attendance: { heldOn: Date; class: { subject: { id: string; code: string; name: string }; faculty: { firstName: string; lastName: string } | null } };
 };
-type Tally = { present: number; absent: number; late: number; excused: number };
+export type Tally = { present: number; absent: number; late: number; excused: number };
 
-const emptyTally = (): Tally => ({ present: 0, absent: 0, late: 0, excused: 0 });
-const count = (tally: Tally, status: AttendanceStatus, amount = 1): void => {
+export const emptyTally = (): Tally => ({ present: 0, absent: 0, late: 0, excused: 0 });
+export const count = (tally: Tally, status: AttendanceStatus, amount = 1): void => {
   if (status === 'PRESENT') tally.present += amount;
   else if (status === 'ABSENT') tally.absent += amount;
   else if (status === 'LATE') tally.late += amount;

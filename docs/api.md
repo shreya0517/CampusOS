@@ -167,3 +167,16 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
   - `fees`: `collected` (completed payments), `outstanding` (unpaid balance of issued, partially paid and overdue invoices), `openInvoices` and `overdueInvoices`.
   - `departments[]`: each department with its `hod` (a faculty member in the department who has the HOD role, or null), `faculty`, `students` (with an active enrollment), 30-day `attendance` and `openTasks` (pending, in progress or rework, assigned to its faculty).
   - `recentActivity[]`: up to 12 of the latest events (students and faculty added, attendance marked, tasks submitted, visitors registered, marks submitted, approved or returned, attendance corrected), at most 4 per kind, newest first, each with a link.
+
+## Student Administration
+
+- GET /api/v1/students: Admin and HOD rows also carry `account` (`{ email, status }`, or null when the student has no sign-in account); faculty rows never include it. Admin and HOD can filter with `accountStatus=ACTIVE|INACTIVE|NO_ACCOUNT` (INACTIVE also matches SUSPENDED); faculty requests ignore it.
+- GET /api/v1/students/export: ADMIN only. Every student matching the same filters (up to 10,000) as `text/csv` with columns Student code, First name, Last name, Email, Department, Course, Semester, Section, Enrollment status, Account status. Cells that start with `=`, `+`, `-`, `@`, tab or carriage return are prefixed with `'` so spreadsheets don't run them as formulas.
+- GET /api/v1/students/sections: ADMIN (every section) and HOD (their department's), each with its semester, course and department, for enrollment forms.
+- PUT /api/v1/students/:id/account: ADMIN only, body `{ "status": "ACTIVE" | "INACTIVE" }`. Deactivating ends all of the student's sessions, so they are signed out at once. Both changes are audited (STUDENT_ACCOUNT_ACTIVATED / STUDENT_ACCOUNT_DEACTIVATED). A student without an account gets 409 NO_ACCOUNT.
+- GET /api/v1/students/:id/record: ADMIN and HOD (their department's students only; others get 404), FACULTY gets 403. For an HOD every part of the record is limited to their department: attendance and coursework from its classes, and results of exams with a paper in it. Returns:
+  - `student`;
+  - `attendance` (overall and by subject, same rules as the student's own attendance);
+  - `coursework` (up to 50 recent assignments in the student's active classes, each GRADED, SUBMITTED, LATE, RETURNED, NOT_SUBMITTED or MISSING when past due without a submission; a saved draft counts as not submitted; undated assignments come last);
+  - published `results`;
+  - `fees`, for Admin only: invoices with paid and balance, and every payment attempt. It is `null` for an HOD, who has no unrestricted financial access.

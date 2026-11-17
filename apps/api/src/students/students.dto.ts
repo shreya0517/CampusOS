@@ -5,7 +5,10 @@ export type CreateStudentDto = { studentCode: string; firstName: string; lastNam
 export type UpdateStudentDto = { firstName?: string; lastName?: string; dateOfBirth?: Date | null };
 export type EnrollmentDto = { sectionId: string; status?: EnrollmentStatus };
 export type UpdateMyContactDto = { phone?: string | null; address?: string | null };
-export type StudentListQuery = { search?: string; departmentId?: string; courseId?: string; semesterId?: string; sectionId?: string; page: number; pageSize: number };
+export const ACCOUNT_FILTERS = ['ACTIVE', 'INACTIVE', 'NO_ACCOUNT'] as const;
+export type AccountFilter = (typeof ACCOUNT_FILTERS)[number];
+export type StudentListQuery = { search?: string; departmentId?: string; courseId?: string; semesterId?: string; sectionId?: string; accountStatus?: AccountFilter; page: number; pageSize: number };
+export type AccountStatusDto = { status: 'ACTIVE' | 'INACTIVE' };
 
 type Body = Record<string, unknown>;
 const invalid = (): never => { throw new BadRequestException({ code: 'INVALID_INPUT', message: 'Request input is invalid.' }); };
@@ -34,4 +37,13 @@ export const parseUpdateMyContactDto = (value: unknown): UpdateMyContactDto => {
   if (typeof address === 'string' && address.length > 300) invalid();
   return { phone, address };
 };
-export const parseStudentListQuery = (value: unknown): StudentListQuery => { const query = object(value); const integer = (input: unknown, fallback: number, max: number) => { if (input === undefined) return fallback; const parsed = Number(input); return Number.isInteger(parsed) && parsed > 0 && parsed <= max ? parsed : invalid(); }; return { search: optionalString(query.search), departmentId: optionalString(query.departmentId), courseId: optionalString(query.courseId), semesterId: optionalString(query.semesterId), sectionId: optionalString(query.sectionId), page: integer(query.page, 1, 10_000), pageSize: integer(query.pageSize, 20, 100) }; };
+export const parseStudentListQuery = (value: unknown): StudentListQuery => { const query = object(value); const integer = (input: unknown, fallback: number, max: number) => { if (input === undefined) return fallback; const parsed = Number(input); return Number.isInteger(parsed) && parsed > 0 && parsed <= max ? parsed : invalid(); }; return { search: optionalString(query.search), departmentId: optionalString(query.departmentId), courseId: optionalString(query.courseId), semesterId: optionalString(query.semesterId), sectionId: optionalString(query.sectionId), accountStatus: accountFilter(query.accountStatus), page: integer(query.page, 1, 10_000), pageSize: integer(query.pageSize, 20, 100) }; };
+function accountFilter(input: unknown): AccountFilter | undefined {
+  if (input === undefined || input === '') return undefined;
+  return typeof input === 'string' && (ACCOUNT_FILTERS as readonly string[]).includes(input) ? (input as AccountFilter) : invalid();
+}
+/** Admins activate or deactivate a student's sign-in account; suspension is not offered here. */
+export const parseAccountStatusDto = (value: unknown): AccountStatusDto => {
+  const status = object(value).status;
+  return status === 'ACTIVE' || status === 'INACTIVE' ? { status } : invalid();
+};
