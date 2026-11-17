@@ -21,7 +21,8 @@ export class FacultyPerformanceService {
   constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
 
   async report(query: { departmentId?: string }, context: AuthorizationContext) {
-    const isAdmin = context.roles.includes('ADMIN') || context.roles.includes('SUPER_ADMIN');
+    // Same roles as the route (ADMIN, HOD), like every other Admin endpoint in the API.
+    const isAdmin = context.roles.includes('ADMIN');
     if (!isAdmin && !context.roles.includes('HOD')) denied();
     if (!isAdmin && (!context.departmentId || (query.departmentId && query.departmentId !== context.departmentId))) denied();
     const departmentId = isAdmin ? query.departmentId : context.departmentId ?? undefined;
