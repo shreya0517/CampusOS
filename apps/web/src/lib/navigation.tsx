@@ -77,6 +77,7 @@ export const ROLE_NAVIGATION: Record<CanonicalRole, NavItem[]> = {
     { label: 'Department', href: '/dashboard/hod-overview', icon: 'department' },
     { label: 'Tasks', href: '/dashboard/tasks', icon: 'tasks' },
     { label: 'Faculty', href: '/dashboard/faculty', icon: 'faculty' },
+    { label: 'Faculty Performance', href: '/dashboard/faculty-performance', icon: 'performance' },
     { label: 'Students', href: '/dashboard/students', icon: 'students' },
     { label: 'Attendance', href: '/dashboard/attendance', icon: 'attendance' },
     { label: 'Timetable', href: '/dashboard/timetable', icon: 'timetable' },
@@ -179,7 +180,6 @@ export function isRouteAllowedForRole(pathname: string, role: CanonicalRole): bo
     if (clean.startsWith('/dashboard/fees')) return false;
     if (clean === '/dashboard/timetable/new') return false; // timetables are built by Admin
     if (clean === '/dashboard/institutional-overview') return false;
-    if (clean === '/dashboard/faculty-performance') return false;
     if (clean === '/foundation') return false;
 
     // Allowed: all departmental operations

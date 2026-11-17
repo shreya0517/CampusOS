@@ -151,3 +151,7 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 - POST /api/v1/fees/invoices/:id/create-razorpay-order and POST /api/v1/fees/payments/verify-razorpay: STUDENT only, for their own invoices (404 otherwise). Orders include `testMode`.
 - GET /api/v1/fees/payment-mode: ADMIN and STUDENT. Returns { testMode, onlinePaymentsAvailable }. The web app has no Razorpay Checkout step yet, so it only offers payment when this says it can complete; this avoids creating pending payments that can never finish.
 - Signature checks: a real Razorpay signature is verified against `RAZORPAY_KEY_SECRET`. The simulated `test_sig_<paymentId>` signature is accepted only in test mode, meaning outside production with no secret configured. In production, both endpoints return 503 PAYMENTS_NOT_CONFIGURED until `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` are set.
+
+## Faculty Performance
+
+- GET /api/v1/faculty/performance?departmentId=: ADMIN (every department, or one via departmentId) and HOD (their own department only; another departmentId returns 403). Returns { windowDays, faculty[] }; each row has the faculty member, `classes` taught, `sessionsMarked` and `assignmentsCreated` in the last `windowDays` (30) days, `pendingEvaluations` (SUBMITTED or LATE submissions in their classes), and `tasks` counts by status plus `overdue` (past the deadline and not approved). All figures come from stored records.

@@ -1,1 +1,13 @@
 import {authenticatedRequest} from './api-client'; export type Department={id:string;code:string;name:string;faculty?:Faculty[]};export type Faculty={id:string;employeeCode:string;firstName:string;lastName:string;departmentId:string|null;department:Department|null};type List<T>={items:T[];total:number;page:number;pageSize:number};export const listFaculty=(q:URLSearchParams):Promise<List<Faculty>>=>{const params=new URLSearchParams(q);const search=params.get('search')?.trim();if(search){params.set('search',search)}else{params.delete('search')}return authenticatedRequest(`/faculty?${params}`)};export const getFaculty=(id:string):Promise<Faculty>=>{return authenticatedRequest(`/faculty/${id}`)};export const getMyFaculty=():Promise<Faculty>=>{return authenticatedRequest('/faculty/me')};export const updateFaculty=(id:string,input:Partial<Pick<Faculty,'employeeCode'|'firstName'|'lastName'|'departmentId'>>):Promise<Faculty>=>{return authenticatedRequest(`/faculty/${id}`,{method:'PUT',body:JSON.stringify(input)})};export const listDepartments=(q=new URLSearchParams()):Promise<List<Department>>=>{return authenticatedRequest(`/departments?${q}`)};export const createDepartment=(input:{code:string;name:string}):Promise<Department>=>{return authenticatedRequest('/departments',{method:'POST',body:JSON.stringify(input)})};export const updateDepartment=(id:string,input:{code?:string;name?:string}):Promise<Department>=>{return authenticatedRequest(`/departments/${id}`,{method:'PUT',body:JSON.stringify(input)})};
+
+export type FacultyTaskCounts = { assigned: number; pending: number; inProgress: number; submitted: number; approved: number; rework: number; overdue: number };
+export type FacultyPerformanceRow = {
+  faculty: { id: string; employeeCode: string; firstName: string; lastName: string; department: { id: string; code: string; name: string } | null };
+  classes: number;
+  sessionsMarked: number;
+  assignmentsCreated: number;
+  pendingEvaluations: number;
+  tasks: FacultyTaskCounts;
+};
+export const getFacultyPerformance = (departmentId?: string): Promise<{ windowDays: number; faculty: FacultyPerformanceRow[] }> =>
+  authenticatedRequest(`/faculty/performance${departmentId ? `?departmentId=${encodeURIComponent(departmentId)}` : ''}`);
