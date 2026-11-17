@@ -106,7 +106,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
 
           {/* Navigation Items */}
-          <nav className="grid gap-1 flex-1 overflow-y-auto pr-0.5">
+          <nav className="flex flex-col gap-1 flex-1 min-h-0 overflow-y-auto pr-0.5">
             {visibleNavigation.map((item) => {
               const isActive = item.exact
                 ? pathname === item.href
