@@ -22,7 +22,8 @@ export default function NewAttendancePage() {
   const [classesLoading, setClassesLoading] = useState(true);
 
   const [selectedClassId, setSelectedClassId] = useState('');
-  const [heldOn, setHeldOn] = useState(new Date().toISOString().slice(0, 10));
+  // Today in the user's time zone; toISOString() is UTC and gave yesterday's date in India before 5:30 AM.
+  const [heldOn, setHeldOn] = useState(new Date().toLocaleDateString('en-CA'));
 
   const [students, setStudents] = useState<Student[]>([]);
   const [studentsLoading, setStudentsLoading] = useState(false);
@@ -42,6 +43,9 @@ export default function NewAttendancePage() {
         const result = await listClasses(new URLSearchParams({ page: '1', pageSize: '100' }));
         setClasses(result.items);
         setClassesError(null);
+        // My Classes links here with ?classId=…; preselect it when it is one of the caller's classes.
+        const preset = new URLSearchParams(window.location.search).get('classId');
+        if (preset && result.items.some((item) => item.id === preset)) setSelectedClassId(preset);
       } catch (reason) {
         setClassesError(reason instanceof Error ? reason.message : 'Classes could not be loaded.');
       } finally {

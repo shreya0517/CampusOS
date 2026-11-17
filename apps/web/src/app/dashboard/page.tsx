@@ -617,7 +617,7 @@ function FacultyDashboard() {
           <StatCard label="Pending Tasks" value={taskStats?.pending ?? 0} href="/dashboard/tasks" />
           <StatCard label="Approved Tasks" value={taskStats?.approved ?? 0} href="/dashboard/tasks" />
           <StatCard label="Today's Classes" value={todayClasses.length} href="/dashboard/timetable" />
-          <StatCard label="Teaching Classes" value={classes.length} href="/dashboard/attendance" />
+          <StatCard label="Teaching Classes" value={classes.length} href="/dashboard/classes" />
           <StatCard label="Active Coursework" value={coursework.length} href="/dashboard/assignments" />
         </div>
       )}

@@ -17,6 +17,18 @@ export class AttendanceController {
     return this.attendance.listClasses(parseClassListQuery(q), c);
   }
 
+  @Get('classes/mine')
+  @RequireRoles('ADMIN', 'HOD', 'FACULTY')
+  myClasses(@CurrentAuthorization() c: AuthorizationContext) {
+    return this.attendance.listMyClasses(c);
+  }
+
+  @Get('classes/:id/overview')
+  @RequireRoles('ADMIN', 'HOD', 'FACULTY')
+  classOverview(@Param('id') id: string, @CurrentAuthorization() c: AuthorizationContext) {
+    return this.attendance.getClassOverview(id, c);
+  }
+
   @Post('attendance')
   @RequireRoles('ADMIN', 'HOD', 'FACULTY')
   create(@Body() b: unknown, @CurrentAuthorization() c: AuthorizationContext) {

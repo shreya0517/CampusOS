@@ -36,4 +36,16 @@ export type MyAttendanceDay = AttendanceSummary & { date: string };
 export type MyAttendanceRecord = { id: string; status: AttendanceStatus; note: string | null; heldOn: string; subject: ClassSubject };
 export type MyAttendance = { threshold: number; overall: AttendanceSummary; subjects: MySubjectAttendance[]; days: MyAttendanceDay[]; records: List<MyAttendanceRecord> };
 
+export type MyClass = ClassRecord & { studentCount: number; sessionsHeld: number; assignmentCount: number; pendingEvaluations: number; attendance: AttendanceSummary };
+export type ClassOverview = {
+  class: ClassRecord;
+  threshold: number;
+  sessionsHeld: number;
+  attendance: AttendanceSummary;
+  students: Array<{ student: AttendanceStudentRef; attendance: AttendanceSummary; submittedAssignments: number }>;
+  assignments: Array<{ id: string; title: string; dueAt: string | null; maxMarks: string | number; submissions: number }>;
+};
+
+export const listMyClasses = (): Promise<MyClass[]> => authenticatedRequest('/classes/mine');
+export const getClassOverview = (id: string): Promise<ClassOverview> => authenticatedRequest(`/classes/${id}/overview`);
 export const getMyAttendance = (q: URLSearchParams = new URLSearchParams()): Promise<MyAttendance> => authenticatedRequest(`/attendance/me?${q}`);

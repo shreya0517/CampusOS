@@ -93,6 +93,7 @@ export const ROLE_NAVIGATION: Record<CanonicalRole, NavItem[]> = {
     { label: 'Dashboard', href: '/dashboard', icon: 'dashboard', exact: true },
     { label: 'My Tasks', href: '/dashboard/tasks', icon: 'tasks' },
     { label: 'Timetable', href: '/dashboard/timetable', icon: 'timetable' },
+    { label: 'My Classes', href: '/dashboard/classes', icon: 'classes' },
     { label: 'Attendance', href: '/dashboard/attendance', icon: 'attendance' },
     { label: 'Assignments', href: '/dashboard/assignments', icon: 'assignments' },
     { label: 'Students', href: '/dashboard/students', icon: 'students' },
@@ -305,6 +306,12 @@ export function NavIcon({ name, className = 'h-5 w-5' }: { name: string; classNa
           <circle cx="8.5" cy="7" r="4" strokeLinecap="round" strokeLinejoin="round" />
           <line x1="20" y1="8" x2="20" y2="14" strokeLinecap="round" strokeLinejoin="round" />
           <line x1="23" y1="11" x2="17" y2="11" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case 'classes':
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M2 4h7a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H2zM22 4h-7a3 3 0 0 0-3 3v13a2 2 0 0 1 2-2h8z" />
         </svg>
       );
     case 'announcements':

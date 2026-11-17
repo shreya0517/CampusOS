@@ -123,3 +123,8 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 - GET and PUT /api/v1/exams/:id/subjects/:examSubjectId/marks: ADMIN reaches every paper, HOD only papers in their department, FACULTY only papers for a subject they teach in that section (or semester, when the paper covers every section); otherwise 403. Marks must name different students enrolled for the paper; otherwise 400 DUPLICATE_STUDENT or 400 STUDENT_NOT_IN_EXAM.
 - POST /api/v1/exams/:id/calculate-results: ADMIN and HOD only. Faculty enter marks but don't publish results.
 - POST /api/v1/exams/:id/subjects: the subject and the optional section must belong to the given semester; otherwise 400 INVALID_EXAM_SUBJECT. For HOD marks access, both the semester and the section of a paper must be in the HOD's department.
+
+## My Classes
+
+- GET /api/v1/classes/mine: ADMIN, HOD and FACULTY. The classes the caller teaches, each with `studentCount` (active enrolment in the section), `sessionsHeld`, `assignmentCount`, `pendingEvaluations` (submissions SUBMITTED or LATE that still need marks) and `attendance` (the same summary shape as the student attendance endpoint).
+- GET /api/v1/classes/:id/overview: ADMIN, HOD and FACULTY, for a class they can open under the usual class scope (faculty: classes they teach; HOD: their department); otherwise 404. Returns { class, threshold, sessionsHeld, attendance, students[], assignments[] }: each student has their attendance in this class and how many of its assignments they submitted; each assignment has its submission count.
