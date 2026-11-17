@@ -432,6 +432,12 @@ export class ExamsService {
     }
 
     await this.database.$transaction(async (tx) => {
+      // Re-check DRAFT inside the write: this conditional update locks the paper row, so a submit or approval running
+      // at the same time either waits for these marks or makes this save fail, instead of marks changing after approval.
+      const stillDraft = await tx.examSubject.updateMany({ where: { id: examSubjectId, collegeId: context.collegeId, marksStatus: 'DRAFT' }, data: { marksStatus: 'DRAFT' } });
+      if (stillDraft.count !== 1) {
+        throw new ConflictException({ code: 'MARKS_LOCKED', message: 'These marks have been submitted for review and can no longer be edited. Ask your HOD to return them if a change is needed.' });
+      }
       for (const m of input.marks) {
         await tx.mark.upsert({
           where: {

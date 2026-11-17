@@ -199,7 +199,7 @@ describe('ExamsService marks access', () => {
   const hod: AuthorizationContext = { userId: 'hod-user', collegeId: 'col-a', roles: ['HOD'], permissions: [], departmentId: 'dept-a' };
   const paper = { id: 'es-1', collegeId: 'col-a', subjectId: 'subj-1', sectionId: 'sec-1', semesterId: 'sem-1', maxMarks: 50, marksStatus: 'DRAFT' };
   const database = {
-    examSubject: { findFirst: jest.fn().mockResolvedValue(paper) },
+    examSubject: { findFirst: jest.fn().mockResolvedValue(paper), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     class: { findFirst: jest.fn() },
     semester: { findFirst: jest.fn() },
     section: { findFirst: jest.fn() },
@@ -293,6 +293,15 @@ describe('ExamsService marks approval', () => {
   it('locks marks once they are submitted', async () => {
     database.examSubject.findFirst.mockResolvedValue(paper('SUBMITTED'));
     await expect(service.updateSubjectMarks('es-1', { marks: [{ studentId: 'stu-1', marksObtained: 40 }] }, faculty)).rejects.toMatchObject({ response: { code: 'MARKS_LOCKED' } });
+    expect(database.mark.upsert).not.toHaveBeenCalled();
+  });
+
+  it('refuses a save that loses the race with a submission', async () => {
+    database.examSubject.findFirst.mockResolvedValue(paper('DRAFT'));
+    database.enrollment.findMany.mockResolvedValue([{ studentId: 'stu-1' }]);
+    database.examSubject.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(service.updateSubjectMarks('es-1', { marks: [{ studentId: 'stu-1', marksObtained: 40 }] }, faculty)).rejects.toMatchObject({ response: { code: 'MARKS_LOCKED' } });
+    expect(database.examSubject.updateMany).toHaveBeenCalledWith({ where: { id: 'es-1', collegeId: 'col-a', marksStatus: 'DRAFT' }, data: { marksStatus: 'DRAFT' } });
     expect(database.mark.upsert).not.toHaveBeenCalled();
   });
 
