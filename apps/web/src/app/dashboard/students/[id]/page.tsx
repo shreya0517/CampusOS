@@ -8,8 +8,11 @@ import { ErrorState, Skeleton } from '@/components/feedback/states';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input, Select } from '@/components/ui/form-field';
-import { getStudent, updateEnrollment, updateStudent } from '@/lib/student-api';
-import type { Student } from '@/lib/student-api';
+import { Dialog } from '@/components/ui/interactive';
+import { AccountBadge } from '@/components/students/account-badge';
+import { StudentRecordSections } from '@/components/students/student-record-sections';
+import { getStudent, getStudentRecord, setStudentAccountStatus, updateEnrollment, updateStudent } from '@/lib/student-api';
+import type { Student, StudentRecord } from '@/lib/student-api';
 
 export default function StudentDetailsPage() {
   const params = useParams<{ id: string }>();
@@ -18,9 +21,14 @@ export default function StudentDetailsPage() {
   // Enrollment changes are Admin only; HODs can still correct a student's details.
   const canManageEnrollment = primaryRole === 'Admin';
 
+  const isAdmin = primaryRole === 'Admin';
   const [student, setStudent] = useState<Student | null>(null);
+  const [record, setRecord] = useState<StudentRecord | null>(null);
+  const [recordError, setRecordError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [confirmingAccount, setConfirmingAccount] = useState(false);
+  const [accountError, setAccountError] = useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -29,11 +37,33 @@ export default function StudentDetailsPage() {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Student could not be loaded.');
     }
+    // Admin and HOD also get the full record: attendance, coursework, results and (Admin only) fees.
+    if (canEdit) {
+      getStudentRecord(params.id)
+        .then((result) => {
+          setRecord(result);
+          setRecordError(null);
+        })
+        .catch((reason: unknown) => setRecordError(reason instanceof Error ? reason.message : 'The academic record could not be loaded.'));
+    }
+  };
+
+  const changeAccountStatus = async (status: 'ACTIVE' | 'INACTIVE') => {
+    setSaving(true);
+    setAccountError(null);
+    try {
+      setStudent(await setStudentAccountStatus(params.id, status));
+      setConfirmingAccount(false);
+    } catch (reason) {
+      setAccountError(reason instanceof Error ? reason.message : 'The account could not be updated.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   useEffect(() => {
     void load();
-  }, [params.id]);
+  }, [params.id, canEdit]);
 
   if (error) return <ErrorState message={error} onRetry={() => void load()} />;
   if (!student) return <div className="grid gap-2"><Skeleton className="h-8 w-56" /><Skeleton className="h-48 w-full" /></div>;
@@ -46,8 +76,51 @@ export default function StudentDetailsPage() {
         <Link className="text-sm font-semibold text-[hsl(var(--primary))] underline" href="/dashboard/students">
           &larr; Students Directory
         </Link>
-        <h1 className="mt-3 text-2xl font-bold tracking-tight">{student.firstName} {student.lastName}</h1>
+        <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl font-bold tracking-tight">{student.firstName} {student.lastName}</h1>
+              {student.account !== undefined && <AccountBadge account={student.account} />}
+            </div>
+            <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+              {student.studentCode}
+              {enrollment ? ` · ${enrollment.section.semester.course.department.name} · ${enrollment.section.semester.course.name} · ${enrollment.section.semester.name} · Section ${enrollment.section.code}` : ''}
+              {student.account ? ` · ${student.account.email}` : ''}
+            </p>
+          </div>
+          {isAdmin && student.account && (
+            <Button variant={student.account.status === 'ACTIVE' ? 'outline' : 'primary'} onClick={() => (student.account?.status === 'ACTIVE' ? setConfirmingAccount(true) : void changeAccountStatus('ACTIVE'))} loading={saving && !confirmingAccount}>
+              {student.account.status === 'ACTIVE' ? 'Deactivate account' : 'Activate account'}
+            </Button>
+          )}
+        </div>
+        {accountError && !confirmingAccount && (
+          <p role="alert" className="mt-3 text-sm text-[hsl(var(--destructive))]">
+            {accountError}
+          </p>
+        )}
       </div>
+
+      <Dialog
+        open={confirmingAccount}
+        title="Deactivate this account?"
+        description={`${student.firstName} ${student.lastName} will be signed out everywhere and won't be able to sign in until the account is activated again. Their records stay as they are.`}
+        onClose={() => setConfirmingAccount(false)}
+      >
+        {accountError && (
+          <p role="alert" className="mb-3 text-sm text-[hsl(var(--destructive))]">
+            {accountError}
+          </p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setConfirmingAccount(false)}>
+            Cancel
+          </Button>
+          <Button variant="destructive" loading={saving} onClick={() => void changeAccountStatus('INACTIVE')}>
+            Deactivate
+          </Button>
+        </div>
+      </Dialog>
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
@@ -139,6 +212,15 @@ export default function StudentDetailsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {canEdit &&
+        (recordError ? (
+          <ErrorState message={recordError} onRetry={() => void load()} />
+        ) : record ? (
+          <StudentRecordSections record={record} />
+        ) : (
+          <Skeleton className="h-64 w-full" />
+        ))}
     </div>
   );
 }
