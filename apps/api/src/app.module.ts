@@ -14,6 +14,7 @@ import { TasksModule } from './tasks/tasks.module';
 import { VisitorsModule } from './visitors/visitors.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { EventsModule } from './events/events.module';
+import { OverviewModule } from './overview/overview.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { EventsModule } from './events/events.module';
     TasksModule,
     VisitorsModule,
     AnnouncementsModule,
+    OverviewModule,
   ],
 })
 export class AppModule {}
