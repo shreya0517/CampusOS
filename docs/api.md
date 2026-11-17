@@ -90,13 +90,13 @@ Authorization runs after access-token authentication. The API derives role, perm
 
 All student endpoints require a bearer access token and derive tenant, role, and department from that authenticated identity. Client-supplied tenant and role values are ignored.
 
-- POST /api/v1/students: ADMIN/HOD creates a student and initial section enrollment. Body: { studentCode, firstName, lastName, dateOfBirth?, sectionId }.
+- POST /api/v1/students: ADMIN creates a student and initial section enrollment. Body: { studentCode, firstName, lastName, dateOfBirth?, sectionId }.
 - GET /api/v1/students: ADMIN/HOD/FACULTY list scoped students. Supports search, departmentId, courseId, semesterId, sectionId, page, and pageSize.
 - GET /api/v1/students/me: STUDENT retrieves only its linked profile, including the college name and the account email and status.
 - PUT /api/v1/students/me: STUDENT updates only their own phone and address. Body: { phone?, address? }; at least one is required, null or an empty string clears it, and every other field is ignored. Phone takes 8 to 20 digits with optional spaces, dashes and a leading +; address takes up to 300 characters.
 - GET /api/v1/students/:id: scoped profile read. STUDENT can only read their own profile.
-- PUT /api/v1/students/:id: ADMIN/HOD update profile fields.
-- POST /api/v1/students/:id/enrollments: ADMIN/HOD add or update a section enrollment. Body: { sectionId, status? }.
+- PUT /api/v1/students/:id: ADMIN, or HOD within their department, update profile fields.
+- POST /api/v1/students/:id/enrollments: ADMIN adds or updates a section enrollment (HOD decision 1: enrollment changes stay with Admin). Body: { sectionId, status? }.
 
 FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD access is restricted to students whose enrolled section belongs to the HOD's department; a courseId filter narrows that scope and never widens it. FACULTY access is restricted further, to students actively enrolled in a section where the faculty member teaches a class. Association requests validate that the section belongs to the authenticated college and department; cross-college and cross-department IDs return 403 FORBIDDEN without resource details.
 
@@ -130,6 +130,8 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 - GET /api/v1/classes/:id/overview: ADMIN, HOD and FACULTY, for a class they can open under the usual class scope (faculty: classes they teach; HOD: their department); otherwise 404. Returns { class, threshold, sessionsHeld, attendance, students[], assignments[] }: each student has their attendance in this class and how many of its assignments they submitted; each assignment has its submission count.
 
 ## HOD Department Boundaries
+
+- POST /api/v1/faculty and PUT /api/v1/faculty/:id: ADMIN only (HOD decision 2). PUT /api/v1/departments/:id: ADMIN only.
 
 - POST /api/v1/tasks/:id/assign: the assignee must be an active HOD or FACULTY account in the college (otherwise 400 INVALID_ASSIGNEE). An HOD may only assign to faculty in their own department (403), and assigning the same person twice returns 409 ALREADY_ASSIGNED.
 - GET /api/v1/visitors, GET /api/v1/visitors/:id and PUT /api/v1/visitors/:id/review: an HOD only reaches visitors whose host is in their department, or, when no host is named, whose registrant is in it (404 otherwise). Only PENDING requests can be reviewed, atomically, so a second concurrent decision gets 409 VISITOR_ALREADY_REVIEWED. ADMIN reaches every visitor in the college.

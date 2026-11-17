@@ -12,6 +12,8 @@ export class StudentsService {
   constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
 
   async create(input: CreateStudentDto, context: AuthorizationContext) {
+    // Enrolling new students is an Admin task (HOD decision 1: the spec reserves enrollment changes for Admin).
+    if (!context.roles.includes('ADMIN')) throw denied();
     this.assertManager(context);
     const section = await this.sectionForContext(input.sectionId, context);
     try {
@@ -34,7 +36,7 @@ export class StudentsService {
   async get(id: string, context: AuthorizationContext) { const student = await this.database.student.findFirst({ where: this.studentWhere(id, context), include: studentInclude, omit: this.contactOmit(context) }); if (!student) throw missing(); return student; }
   async me(context: AuthorizationContext) { if (!context.roles.includes('STUDENT')) throw denied(); const student = await this.database.student.findFirst({ where: { collegeId: context.collegeId, userId: context.userId }, include: myStudentInclude }); if (!student) throw missing(); return student; }
   async update(id: string, input: UpdateStudentDto, context: AuthorizationContext) { this.assertManager(context); await this.get(id, context); return this.database.student.update({ where: { collegeId_id: { collegeId: context.collegeId, id } }, data: input, include: studentInclude }); }
-  async enroll(id: string, input: EnrollmentDto, context: AuthorizationContext) { this.assertManager(context); await this.get(id, context); const section = await this.sectionForContext(input.sectionId, context); return this.database.enrollment.upsert({ where: { collegeId_studentId_sectionId: { collegeId: context.collegeId, studentId: id, sectionId: section.id } }, create: { collegeId: context.collegeId, studentId: id, sectionId: section.id, status: input.status ?? EnrollmentStatus.ACTIVE }, update: { status: input.status ?? EnrollmentStatus.ACTIVE }, include: { section: { include: { semester: { include: { course: { include: { department: true } } } } } } } }); }
+  async enroll(id: string, input: EnrollmentDto, context: AuthorizationContext) { if (!context.roles.includes('ADMIN')) throw denied(); await this.get(id, context); const section = await this.sectionForContext(input.sectionId, context); return this.database.enrollment.upsert({ where: { collegeId_studentId_sectionId: { collegeId: context.collegeId, studentId: id, sectionId: section.id } }, create: { collegeId: context.collegeId, studentId: id, sectionId: section.id, status: input.status ?? EnrollmentStatus.ACTIVE }, update: { status: input.status ?? EnrollmentStatus.ACTIVE }, include: { section: { include: { semester: { include: { course: { include: { department: true } } } } } } } }); }
 
   /** A student updates only their own phone and address; everything else stays with the college. */
   async updateMyContact(input: UpdateMyContactDto, context: AuthorizationContext) {

@@ -15,6 +15,8 @@ export default function StudentDetailsPage() {
   const params = useParams<{ id: string }>();
   const { primaryRole } = useAuth();
   const canEdit = primaryRole === 'Admin' || primaryRole === 'HOD';
+  // Enrollment changes are Admin only; HODs can still correct a student's details.
+  const canManageEnrollment = primaryRole === 'Admin';
 
   const [student, setStudent] = useState<Student | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -99,7 +101,7 @@ export default function StudentDetailsPage() {
                 <p className="text-sm text-[hsl(var(--muted-foreground))]">
                   {enrollment.section.semester.course.name} · {enrollment.section.semester.name} · Section {enrollment.section.code}
                 </p>
-                {canEdit ? (
+                {canManageEnrollment ? (
                   <Select
                     label="Enrollment status"
                     value={enrollment.status}

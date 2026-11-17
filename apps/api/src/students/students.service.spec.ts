@@ -108,3 +108,21 @@ describe('StudentsService faculty and HOD scope', () => {
     });
   });
 });
+
+describe('StudentsService HOD decision 1', () => {
+  const database = { section: { findFirst: jest.fn() }, student: { create: jest.fn(), findFirst: jest.fn().mockResolvedValue({ id: 'student-a' }), update: jest.fn().mockResolvedValue({ id: 'student-a' }) }, enrollment: { upsert: jest.fn() } };
+  const service = new StudentsService(database as never);
+  beforeEach(() => jest.clearAllMocks());
+
+  it('leaves creating students and changing enrollments to admins', async () => {
+    await expect(service.create({ studentCode: 'STU-9', firstName: 'Asha', lastName: 'Nair', sectionId: 'section-a' }, hod)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.enroll('student-a', { sectionId: 'section-a' }, hod)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(database.student.create).not.toHaveBeenCalled();
+    expect(database.enrollment.upsert).not.toHaveBeenCalled();
+  });
+
+  it("still lets an HOD correct a student's details in their department", async () => {
+    await expect(service.update('student-a', { firstName: 'Aarav' }, hod)).resolves.toEqual({ id: 'student-a' });
+    expect(database.student.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: 'student-a', collegeId: 'college-a' }) }));
+  });
+});

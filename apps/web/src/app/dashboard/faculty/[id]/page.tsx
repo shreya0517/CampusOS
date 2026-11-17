@@ -14,7 +14,8 @@ import type { Faculty } from '@/lib/faculty-api';
 export default function FacultyDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { primaryRole } = useAuth();
-  const canEdit = primaryRole === 'Admin' || primaryRole === 'HOD';
+  // Faculty records are managed by Admin.
+  const canEdit = primaryRole === 'Admin';
 
   const [faculty, setFaculty] = useState<Faculty | null>(null);
   const [error, setError] = useState<string | null>(null);
