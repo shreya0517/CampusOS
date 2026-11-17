@@ -169,3 +169,18 @@ describe('ExamsService', () => {
     });
   });
 });
+
+describe('ExamsService student fields in results', () => {
+  const database = {
+    exam: { findFirst: jest.fn().mockResolvedValue({ id: 'exam-a', collegeId: 'col-a' }) },
+    result: { findMany: jest.fn().mockResolvedValue([]) },
+  };
+  const service = new ExamsService(database as never);
+
+  it('returns only identity fields for each student, never contact details', async () => {
+    await service.listExamResults('exam-a', faculty);
+    expect(database.result.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      include: { student: { select: { id: true, studentCode: true, firstName: true, lastName: true } } },
+    }));
+  });
+});

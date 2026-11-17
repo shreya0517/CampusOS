@@ -56,7 +56,8 @@ export default function MyProfilePage() {
   const save = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     const trimmedPhone = phone.trim();
-    if (trimmedPhone && !/^\+?[0-9][0-9 -]{6,18}[0-9]$/.test(trimmedPhone)) {
+    const digitCount = trimmedPhone.replace(/\D/g, '').length;
+    if (trimmedPhone && (!/^\+?[0-9][0-9 -]*[0-9]$/.test(trimmedPhone) || digitCount < 8 || digitCount > 20)) {
       setFormError('Enter a phone number with 8 to 20 digits. Spaces, dashes and a leading + are fine.');
       return;
     }

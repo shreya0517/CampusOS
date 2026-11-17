@@ -10,6 +10,9 @@ import type {
   UpdateMarksDto,
 } from './exams.dto';
 
+/** Students in exam and fee responses carry only identity fields, never contact details. */
+const STUDENT_SUMMARY = { select: { id: true, studentCode: true, firstName: true, lastName: true } };
+
 const denied = (): never => {
   throw new ForbiddenException({ code: 'FORBIDDEN', message: 'You are not authorized to access this resource.' });
 };
@@ -238,7 +241,7 @@ export class ExamsService {
     const [enrollments, existingMarks] = await Promise.all([
       this.database.enrollment.findMany({
         where: enrollmentWhere,
-        include: { student: true },
+        include: { student: STUDENT_SUMMARY },
         orderBy: { student: { lastName: 'asc' } },
       }),
       this.database.mark.findMany({
@@ -415,7 +418,7 @@ export class ExamsService {
     const results = await this.database.result.findMany({
       where: { collegeId: context.collegeId, examId },
       include: {
-        student: true,
+        student: STUDENT_SUMMARY,
       },
       orderBy: { percentage: 'desc' },
     });

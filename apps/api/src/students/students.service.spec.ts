@@ -61,6 +61,9 @@ describe('StudentsService', () => {
       expect(parseUpdateMyContactDto({ studentCode: 'X', phone: '9876543210' })).toEqual({ phone: '9876543210', address: undefined });
       expect(() => parseUpdateMyContactDto({ studentCode: 'X' })).toThrow();
       expect(() => parseUpdateMyContactDto({ phone: 'call me' })).toThrow();
+      expect(() => parseUpdateMyContactDto({ phone: '1------2' })).toThrow();
+      expect(() => parseUpdateMyContactDto({ phone: '123 4567' })).toThrow();
+      expect(parseUpdateMyContactDto({ phone: '+91-98765-43210' }).phone).toBe('+91-98765-43210');
       expect(() => parseUpdateMyContactDto({ address: 'x'.repeat(301) })).toThrow();
     });
 

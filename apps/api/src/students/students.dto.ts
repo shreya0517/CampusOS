@@ -29,7 +29,8 @@ export const parseUpdateMyContactDto = (value: unknown): UpdateMyContactDto => {
   const phone = clearable(body.phone);
   const address = clearable(body.address);
   if (phone === undefined && address === undefined) invalid();
-  if (typeof phone === 'string' && !/^\+?[0-9][0-9 -]{6,18}[0-9]$/.test(phone)) invalid();
+  // Spaces and dashes are allowed as separators, but the number itself needs 8 to 20 digits.
+  if (typeof phone === 'string' && (!/^\+?[0-9][0-9 -]*[0-9]$/.test(phone) || !/^\d{8,20}$/.test(phone.replace(/\D/g, '')))) invalid();
   if (typeof address === 'string' && address.length > 300) invalid();
   return { phone, address };
 };
