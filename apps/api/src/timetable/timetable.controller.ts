@@ -12,7 +12,7 @@ export class TimetableController {
   constructor(@Inject(TimetableService) private readonly service: TimetableService) {}
 
   @Post()
-  @RequireRoles('ADMIN', 'HOD', 'FACULTY')
+  @RequireRoles('ADMIN')
   async createEntry(@Body() body: unknown, @CurrentAuthorization() context: AuthorizationContext) {
     const input = parseCreateTimetableDto(body);
     return this.service.createEntry(input, context);
@@ -40,7 +40,7 @@ export class TimetableController {
   }
 
   @Delete(':id')
-  @RequireRoles('ADMIN', 'HOD', 'FACULTY')
+  @RequireRoles('ADMIN')
   async deleteEntry(@Param('id') id: string, @CurrentAuthorization() context: AuthorizationContext) {
     return this.service.deleteEntry(id, context);
   }

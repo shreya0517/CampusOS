@@ -270,3 +270,45 @@ describe('TimetableService student scoping', () => {
     expect(database.student.findFirst).not.toHaveBeenCalled();
   });
 });
+
+describe('TimetableService staff scope', () => {
+  const database = { timetable: { findMany: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) } };
+  const service = new TimetableService(database as unknown as DatabaseService);
+  const listWhere = (): Record<string, unknown> => (database.timetable.findMany.mock.calls.at(-1)?.[0] as { where: Record<string, unknown> }).where;
+  beforeEach(() => jest.clearAllMocks());
+
+  it('shows an HOD only their department\'s timetable', async () => {
+    await service.listEntries(parseTimetableListQuery({}), { userId: 'hod', collegeId: 'col-a', roles: ['HOD'], permissions: [], departmentId: 'dept-a' });
+    expect(listWhere()).toEqual({ collegeId: 'col-a', class: { section: { semester: { course: { departmentId: 'dept-a' } } } } });
+  });
+
+  it('shows faculty only the classes they teach', async () => {
+    await service.listEntries(parseTimetableListQuery({ sectionId: 'sec-1' }), facultyContext);
+    expect(listWhere()).toEqual({ collegeId: 'col-a', class: { sectionId: 'sec-1', faculty: { userId: 'fac-user' } } });
+  });
+});
+
+describe('TimetableService HOD and write rules', () => {
+  const hod: AuthorizationContext = { userId: 'hod-user', collegeId: 'col-a', roles: ['HOD'], permissions: [], departmentId: 'dept-a' };
+  const database = {
+    class: { findFirst: jest.fn() },
+    timetable: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn(), delete: jest.fn() },
+    faculty: { findFirst: jest.fn().mockResolvedValue({ id: 'fac-hod' }) },
+  };
+  const service = new TimetableService(database as unknown as DatabaseService);
+  beforeEach(() => jest.clearAllMocks());
+
+  it('gives an HOD the classes they teach as My Timetable, not the whole college', async () => {
+    await service.getMyTimetable(hod);
+    expect(database.timetable.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { collegeId: 'col-a', class: { facultyId: 'fac-hod' } } }));
+  });
+
+  it('lets only admins create or delete timetable entries', async () => {
+    const dto = parseCreateTimetableDto({ classId: 'cls-1', roomId: 'room-1', dayOfWeek: 1, startsAt: '09:00', endsAt: '10:00' });
+    await expect(service.createEntry(dto, hod)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.createEntry(dto, facultyContext)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.deleteEntry('tt-1', hod)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(database.class.findFirst).not.toHaveBeenCalled();
+    expect(database.timetable.delete).not.toHaveBeenCalled();
+  });
+});

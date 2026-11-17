@@ -1,4 +1,4 @@
-import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { VisitorStatus } from '@prisma/client';
 import { DatabaseService } from '../database.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
@@ -29,6 +29,13 @@ export class VisitorsService {
     return context.roles.includes('HOD');
   }
 
+  /** An HOD's visitors: hosted by someone in their department, or, when nobody is named as host, registered by someone in it. */
+  private hodScope(context: AuthorizationContext) {
+    if (!context.departmentId) denied();
+    const inDepartment = { facultyProfiles: { some: { departmentId: context.departmentId ?? '' } } };
+    return { OR: [{ host: inDepartment }, { hostUserId: null, registeredBy: inDepartment }] };
+  }
+
   async registerVisitor(input: CreateVisitorDto, context: AuthorizationContext): Promise<unknown> {
     return this.database.visitor.create({
       data: {
@@ -54,15 +61,7 @@ export class VisitorsService {
     if (this.isAdmin(context)) {
       // sees all
     } else if (this.isHod(context)) {
-      // HOD sees visitors registered by members of their department context
-      // Scoped to registeredByUserId within their department; use department context
-      if (context.departmentId) {
-        where.registeredBy = {
-          faculty: { departmentId: context.departmentId, collegeId: context.collegeId },
-        };
-      } else {
-        where.registeredByUserId = context.userId;
-      }
+      Object.assign(where, this.hodScope(context));
     } else {
       denied();
     }
@@ -82,8 +81,9 @@ export class VisitorsService {
   }
 
   async getVisitor(id: string, context: AuthorizationContext): Promise<unknown> {
+    const hodOnly = this.isHod(context) && !this.isAdmin(context);
     const visitor = await this.database.visitor.findFirst({
-      where: { id, collegeId: context.collegeId },
+      where: { id, collegeId: context.collegeId, ...(hodOnly ? this.hodScope(context) : {}) },
       include: visitorInclude,
     });
     if (!visitor) visitorMissing();
@@ -99,22 +99,27 @@ export class VisitorsService {
   async reviewVisitor(id: string, input: ReviewVisitorDto, context: AuthorizationContext): Promise<unknown> {
     if (!this.isAdmin(context) && !this.isHod(context)) denied();
 
+    // An HOD can only review visitors for their own department, and a decision can't be changed afterwards.
+    const hodOnly = this.isHod(context) && !this.isAdmin(context);
     const visitor = await this.database.visitor.findFirst({
-      where: { id, collegeId: context.collegeId },
+      where: { id, collegeId: context.collegeId, ...(hodOnly ? this.hodScope(context) : {}) },
     });
     if (!visitor) visitorMissing();
+    if (visitor!.status !== VisitorStatus.PENDING) {
+      throw new ConflictException({ code: 'VISITOR_ALREADY_REVIEWED', message: 'This visitor request has already been reviewed.' });
+    }
 
     const newStatus = input.decision === 'APPROVED' ? VisitorStatus.APPROVED : VisitorStatus.REJECTED;
 
-    return this.database.visitor.update({
-      where: { id },
-      data: {
-        status: newStatus,
-        approvedByUserId: context.userId,
-        approvedAt: new Date(),
-      },
-      include: visitorInclude,
+    // Only a still-pending request is updated, so if two reviewers decide at once the second one gets a conflict.
+    const decided = await this.database.visitor.updateMany({
+      where: { id, collegeId: context.collegeId, status: VisitorStatus.PENDING },
+      data: { status: newStatus, approvedByUserId: context.userId, approvedAt: new Date() },
     });
+    if (decided.count !== 1) {
+      throw new ConflictException({ code: 'VISITOR_ALREADY_REVIEWED', message: 'This visitor request has already been reviewed.' });
+    }
+    return this.database.visitor.findFirst({ where: { id, collegeId: context.collegeId }, include: visitorInclude });
   }
 
   async myVisitors(context: AuthorizationContext): Promise<unknown> {
