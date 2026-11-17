@@ -55,6 +55,98 @@ export class AttendanceService {
     if (enrolled.length !== unique.length) throw new BadRequestException({ code: 'STUDENT_NOT_IN_CLASS', message: 'Attendance can only be recorded for students enrolled in this class.' });
   }
 
+  /** Attendance totals per class, so lists and rosters show the same percentages as the student view. */
+  private async classAttendance(classId: string, context: AuthorizationContext) {
+    const grouped = await this.database.attendanceRecord.groupBy({
+      by: ['status'],
+      where: { collegeId: context.collegeId, attendance: { classId } },
+      _count: { _all: true },
+    });
+    const tally = emptyTally();
+    for (const row of grouped) count(tally, row.status, row._count._all);
+    return summarize(tally);
+  }
+
+  /** The classes the signed-in staff member teaches, with enrolment, sessions held, attendance and coursework counts. */
+  async listMyClasses(context: AuthorizationContext) {
+    if (context.roles.includes('STUDENT')) denied();
+    const classes = await this.database.class.findMany({
+      where: { collegeId: context.collegeId, faculty: { userId: context.userId } },
+      include: { ...classInclude, _count: { select: { attendances: true, assignments: true } } },
+      orderBy: [{ subject: { name: 'asc' } }, { section: { code: 'asc' } }],
+    });
+    const enrolled = await this.database.enrollment.groupBy({
+      by: ['sectionId'],
+      where: { collegeId: context.collegeId, status: 'ACTIVE', sectionId: { in: [...new Set(classes.map((cls) => cls.sectionId))] } },
+      _count: { _all: true },
+    });
+    const enrolledBySection = new Map(enrolled.map((row) => [row.sectionId, row._count._all]));
+    return Promise.all(
+      classes.map(async ({ _count, ...cls }) => ({
+        ...cls,
+        studentCount: enrolledBySection.get(cls.sectionId) ?? 0,
+        sessionsHeld: _count.attendances,
+        assignmentCount: _count.assignments,
+        attendance: await this.classAttendance(cls.id, context),
+        // Submitted work that still needs marks.
+        pendingEvaluations: await this.database.submission.count({ where: { collegeId: context.collegeId, assignment: { classId: cls.id }, status: { in: ['SUBMITTED', 'LATE'] } } }),
+      })),
+    );
+  }
+
+  /**
+   * One class's roster: every actively enrolled student with their attendance in this class and how many of
+   * its assignments they have submitted. Uses the same scope as other class reads.
+   */
+  async getClassOverview(classId: string, context: AuthorizationContext) {
+    if (context.roles.includes('STUDENT')) denied();
+    const cls = await this.resolveClass(classId, context);
+    const [enrollments, recordCounts, sessionsHeld, assignments, submissionCounts] = await Promise.all([
+      this.database.enrollment.findMany({
+        where: { collegeId: context.collegeId, sectionId: cls.sectionId, status: 'ACTIVE' },
+        select: { student: { select: { id: true, studentCode: true, firstName: true, lastName: true } } },
+        orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }],
+      }),
+      this.database.attendanceRecord.groupBy({ by: ['studentId', 'status'], where: { collegeId: context.collegeId, attendance: { classId } }, _count: { _all: true } }),
+      this.database.attendance.count({ where: { collegeId: context.collegeId, classId } }),
+      this.database.assignment.findMany({
+        where: { collegeId: context.collegeId, classId },
+        select: { id: true, title: true, dueAt: true, maxMarks: true, _count: { select: { submissions: { where: { status: { not: 'DRAFT' } } } } } },
+        orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
+      }),
+      this.database.submission.groupBy({ by: ['studentId'], where: { collegeId: context.collegeId, assignment: { classId }, status: { not: 'DRAFT' } }, _count: { _all: true } }),
+    ]);
+
+    const tallies = new Map<string, Tally>();
+    for (const row of recordCounts) {
+      const tally = tallies.get(row.studentId) ?? emptyTally();
+      count(tally, row.status, row._count._all);
+      tallies.set(row.studentId, tally);
+    }
+    const submitted = new Map(submissionCounts.map((row) => [row.studentId, row._count._all]));
+    const students = enrollments.map(({ student }) => ({
+      student,
+      attendance: summarize(tallies.get(student.id) ?? emptyTally()),
+      submittedAssignments: submitted.get(student.id) ?? 0,
+    }));
+    const overall = emptyTally();
+    for (const tally of tallies.values()) {
+      overall.present += tally.present;
+      overall.absent += tally.absent;
+      overall.late += tally.late;
+      overall.excused += tally.excused;
+    }
+
+    return {
+      class: cls,
+      threshold: ATTENDANCE_THRESHOLD_PERCENT,
+      sessionsHeld,
+      attendance: summarize(overall),
+      students,
+      assignments: assignments.map(({ _count, ...assignment }) => ({ ...assignment, submissions: _count.submissions })),
+    };
+  }
+
   async listClasses(query: ClassListQuery, context: AuthorizationContext) {
     if (context.roles.includes('STUDENT')) denied();
     const where = this.classWhere(context, { departmentId: query.departmentId, sectionId: query.sectionId });
@@ -257,11 +349,11 @@ type MyRecord = {
 type Tally = { present: number; absent: number; late: number; excused: number };
 
 const emptyTally = (): Tally => ({ present: 0, absent: 0, late: 0, excused: 0 });
-const count = (tally: Tally, status: AttendanceStatus): void => {
-  if (status === 'PRESENT') tally.present += 1;
-  else if (status === 'ABSENT') tally.absent += 1;
-  else if (status === 'LATE') tally.late += 1;
-  else tally.excused += 1;
+const count = (tally: Tally, status: AttendanceStatus, amount = 1): void => {
+  if (status === 'PRESENT') tally.present += amount;
+  else if (status === 'ABSENT') tally.absent += amount;
+  else if (status === 'LATE') tally.late += amount;
+  else tally.excused += amount;
 };
 
 /** Late counts as attended. Excused sessions are left out of the percentage instead of counting against the student. */
