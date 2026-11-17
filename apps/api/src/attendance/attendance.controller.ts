@@ -41,6 +41,12 @@ export class AttendanceController {
     return this.attendance.getAttendance(id, c);
   }
 
+  @Get('attendance/:id/history')
+  @RequireRoles('ADMIN', 'HOD', 'FACULTY')
+  history(@Param('id') id: string, @CurrentAuthorization() c: AuthorizationContext) {
+    return this.attendance.getAttendanceHistory(id, c);
+  }
+
   @Put('attendance/:id')
   @RequireRoles('ADMIN', 'HOD', 'FACULTY')
   update(@Param('id') id: string, @Body() b: unknown, @CurrentAuthorization() c: AuthorizationContext) {

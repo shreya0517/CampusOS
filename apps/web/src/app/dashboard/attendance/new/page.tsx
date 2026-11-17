@@ -129,7 +129,20 @@ export default function NewAttendancePage() {
 
           {selectedClassId && (
             <Card>
-              <CardHeader><CardTitle>Student roster</CardTitle></CardHeader>
+              <CardHeader>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <CardTitle>Student roster</CardTitle>
+                  {students.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setStatuses(Object.fromEntries(students.map((s) => [s.id, 'PRESENT' as AttendanceStatus])))}
+                    >
+                      Mark all present
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
               <CardContent>
                 {studentsLoading ? (
                   <Skeleton className="h-24 w-full" />
