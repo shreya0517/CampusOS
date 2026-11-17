@@ -176,6 +176,16 @@ export class ExamsService {
     });
     if (!exam) throw examMissing();
 
+    // The subject and the optional section must both belong to the paper's semester; otherwise a paper could pair one
+    // department's semester with another department's section and slip past department checks.
+    const [subject, section] = await Promise.all([
+      this.database.subject.findFirst({ where: { id: input.subjectId, collegeId: context.collegeId, semesterId: input.semesterId }, select: { id: true } }),
+      input.sectionId ? this.database.section.findFirst({ where: { id: input.sectionId, collegeId: context.collegeId, semesterId: input.semesterId }, select: { id: true } }) : Promise.resolve({ id: null }),
+    ]);
+    if (!subject || !section) {
+      throw new BadRequestException({ code: 'INVALID_EXAM_SUBJECT', message: 'The subject and section must belong to the selected semester.' });
+    }
+
     try {
       return await this.database.examSubject.create({
         data: {
@@ -222,11 +232,15 @@ export class ExamsService {
     if (context.roles.includes('ADMIN') || context.roles.includes('SUPER_ADMIN')) return;
     if (context.roles.includes('HOD')) {
       if (!context.departmentId) denied();
-      const inDepartment = await this.database.semester.findFirst({
-        where: { id: examSubject.semesterId, collegeId: context.collegeId, course: { departmentId: context.departmentId ?? '' } },
-        select: { id: true },
-      });
-      if (!inDepartment) denied();
+      const departmentId = context.departmentId ?? '';
+      // Both the semester and, for section papers, the section must be in the HOD's department.
+      const [semesterInDepartment, sectionInDepartment] = await Promise.all([
+        this.database.semester.findFirst({ where: { id: examSubject.semesterId, collegeId: context.collegeId, course: { departmentId } }, select: { id: true } }),
+        examSubject.sectionId
+          ? this.database.section.findFirst({ where: { id: examSubject.sectionId, collegeId: context.collegeId, semester: { course: { departmentId } } }, select: { id: true } })
+          : Promise.resolve({ id: null }),
+      ]);
+      if (!semesterInDepartment || !sectionInDepartment) denied();
       return;
     }
     const teaches = await this.database.class.findFirst({

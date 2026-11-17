@@ -199,6 +199,8 @@ describe('ExamsService marks access', () => {
     examSubject: { findFirst: jest.fn().mockResolvedValue(paper) },
     class: { findFirst: jest.fn() },
     semester: { findFirst: jest.fn() },
+    section: { findFirst: jest.fn() },
+    subject: { findFirst: jest.fn() },
     enrollment: { findMany: jest.fn().mockResolvedValue([]) },
     mark: { findMany: jest.fn().mockResolvedValue([]), upsert: jest.fn() },
     exam: { findFirst: jest.fn() },
@@ -216,6 +218,26 @@ describe('ExamsService marks access', () => {
       where: { collegeId: 'col-a', subjectId: 'subj-1', faculty: { userId: 'faculty-user' }, sectionId: 'sec-1' },
     }));
     expect(database.mark.upsert).not.toHaveBeenCalled();
+  });
+
+  it('checks the section as well as the semester for HODs', async () => {
+    database.semester.findFirst.mockResolvedValue({ id: 'sem-1' });
+    database.section.findFirst.mockResolvedValue(null);
+    await expect(service.getSubjectMarks('es-1', hod)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(database.section.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'sec-1', collegeId: 'col-a', semester: { course: { departmentId: 'dept-a' } } } }));
+    database.section.findFirst.mockResolvedValue({ id: 'sec-1' });
+    await expect(service.getSubjectMarks('es-1', hod)).resolves.toBeDefined();
+  });
+
+  it('rejects papers whose subject or section is not in the chosen semester', async () => {
+    database.exam.findFirst.mockResolvedValue({ id: 'exam-1', collegeId: 'col-a' });
+    database.subject.findFirst.mockResolvedValue({ id: 'subj-1' });
+    database.section.findFirst.mockResolvedValue(null);
+    const input = { subjectId: 'subj-1', semesterId: 'sem-1', sectionId: 'sec-other', examAt: '2026-12-01T10:00:00Z', maxMarks: 50, passMarks: 20 };
+    await expect(service.addExamSubject('exam-1', input, admin)).rejects.toMatchObject({ response: { code: 'INVALID_EXAM_SUBJECT' } });
+    expect(database.section.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'sec-other', collegeId: 'col-a', semesterId: 'sem-1' } }));
+    database.subject.findFirst.mockResolvedValue(null);
+    await expect(service.addExamSubject('exam-1', { ...input, sectionId: undefined }, admin)).rejects.toMatchObject({ response: { code: 'INVALID_EXAM_SUBJECT' } });
   });
 
   it('keeps HODs inside their department', async () => {
