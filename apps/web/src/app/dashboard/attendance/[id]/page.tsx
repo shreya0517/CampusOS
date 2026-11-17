@@ -7,8 +7,9 @@ import { ErrorState, Skeleton } from '@/components/feedback/states';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableCell, TableHead } from '@/components/ui/table';
-import { getAttendance, updateAttendance } from '@/lib/attendance-api';
-import type { AttendanceRecordItem, AttendanceSession, AttendanceStatus } from '@/lib/attendance-api';
+import { useAuth } from '@/components/auth-provider';
+import { getAttendance, getAttendanceHistory, updateAttendance } from '@/lib/attendance-api';
+import type { AttendanceHistoryEntry, AttendanceRecordItem, AttendanceSession, AttendanceStatus } from '@/lib/attendance-api';
 
 const STATUS_OPTIONS: AttendanceStatus[] = ['PRESENT', 'ABSENT', 'LATE', 'EXCUSED'];
 const STATUS_COLORS: Record<AttendanceStatus, string> = {
@@ -22,8 +23,13 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 }
 
+const formatDateTime = (iso: string): string =>
+  new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
 export default function AttendanceDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const { primaryRole } = useAuth();
+  const [history, setHistory] = useState<AttendanceHistoryEntry[]>([]);
 
   const [session, setSession] = useState<AttendanceSession | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,8 +41,9 @@ export default function AttendanceDetailPage() {
 
   const load = async (): Promise<void> => {
     try {
-      const data = await getAttendance(id);
+      const [data, entries] = await Promise.all([getAttendance(id), getAttendanceHistory(id).catch(() => [] as AttendanceHistoryEntry[])]);
       setSession(data);
+      setHistory(entries);
       setError(null);
       // Sync edit state from loaded data
       setStatuses(Object.fromEntries(data.records.map((r) => [r.studentId, r.status])));
@@ -63,6 +70,7 @@ export default function AttendanceDetailPage() {
       }));
       const updated = await updateAttendance(id, { records });
       setSession(updated);
+      setHistory(await getAttendanceHistory(id).catch(() => history));
       setEditing(false);
     } catch (reason) {
       setSaveError(reason instanceof Error ? reason.message : 'Could not save attendance.');
@@ -70,6 +78,10 @@ export default function AttendanceDetailPage() {
       setSaving(false);
     }
   };
+
+  // Faculty can correct a session for 48 hours after marking it; HOD and Admin are not limited by this window.
+  const windowClosed = primaryRole === 'Faculty' && new Date() > new Date(session.correctionWindowEndsAt);
+  const markedBy = history.find((entry) => entry.action === 'ATTENDANCE_MARKED')?.actor?.displayName;
 
   const summary: Record<AttendanceStatus, number> = { PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0 };
   session.records.forEach((r) => { summary[r.status] = (summary[r.status] ?? 0) + 1; });
@@ -85,11 +97,21 @@ export default function AttendanceDetailPage() {
           <p className="mt-1 text-[hsl(var(--muted-foreground))]">
             {session.class.section.semester.course.name} · Section {session.class.section.code} · {formatDate(session.heldOn)}
           </p>
+          <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+            Marked {markedBy ? `by ${markedBy} ` : ''}on {formatDateTime(session.createdAt)}
+            {primaryRole === 'Faculty' && !windowClosed ? ` · You can correct it until ${formatDateTime(session.correctionWindowEndsAt)}` : ''}
+          </p>
         </div>
-        {!editing && (
+        {!editing && !windowClosed && (
           <Button variant="outline" onClick={() => setEditing(true)}>Edit records</Button>
         )}
       </div>
+
+      {windowClosed && (
+        <p role="status" className="rounded-[var(--radius)] border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          The 48-hour correction window for this session has closed. Ask your HOD if a record needs to be corrected.
+        </p>
+      )}
 
       {/* Summary cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -182,6 +204,38 @@ export default function AttendanceDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {history.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>History</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ol className="grid gap-4">
+              {history.map((entry) => (
+                <li key={entry.id} className="border-l-2 pl-4">
+                  <p className="text-sm font-semibold">
+                    {entry.action === 'ATTENDANCE_MARKED' ? 'Marked' : 'Corrected'} by {entry.actor?.displayName ?? 'a removed user'}
+                  </p>
+                  <p className="text-xs text-[hsl(var(--muted-foreground))]">{formatDateTime(entry.createdAt)}</p>
+                  {entry.changes.length > 0 && (
+                    <ul className="mt-2 grid gap-1 text-sm">
+                      {entry.changes.map((change) => (
+                        <li key={change.studentId}>
+                          {change.student ? `${change.student.firstName} ${change.student.lastName}` : 'Student'}:{' '}
+                          <span className={STATUS_COLORS[change.from?.status ?? 'EXCUSED']}>{change.from?.status ?? 'not recorded'}</span> →{' '}
+                          <span className={`font-semibold ${STATUS_COLORS[change.to.status]}`}>{change.to.status}</span>
+                          {change.to.note && change.to.note !== change.from?.note ? <span className="text-[hsl(var(--muted-foreground))]"> · “{change.to.note}”</span> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
