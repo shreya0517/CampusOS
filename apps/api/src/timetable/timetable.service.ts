@@ -188,6 +188,15 @@ export class TimetableService {
       if (query.facultyId) classWhere.facultyId = query.facultyId;
       where.class = classWhere;
     }
+    const isAdmin = context.roles.includes('ADMIN') || context.roles.includes('SUPER_ADMIN');
+    if (!isAdmin && context.roles.includes('HOD')) {
+      // HODs see their own department's timetable.
+      if (!context.departmentId) return { items: [], total: 0, page: query.page, pageSize: query.pageSize, totalPages: 1 };
+      where.class = { ...((where.class as Record<string, unknown> | undefined) ?? {}), section: { semester: { course: { departmentId: context.departmentId } } } };
+    } else if (!isAdmin && context.roles.includes('FACULTY')) {
+      // Faculty see only the classes they teach.
+      where.class = { ...((where.class as Record<string, unknown> | undefined) ?? {}), faculty: { userId: context.userId } };
+    }
     if (this.isStudentOnly(context)) {
       // Students only see the timetable of the sections they are enrolled in.
       const sectionIds = await this.studentSectionIds(context);
