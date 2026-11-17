@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/components/auth-provider';
 import { Button } from '@/components/ui/button';
@@ -28,33 +29,92 @@ import { EmptyState, Skeleton } from '@/components/feedback/states';
 import { StudentDashboardView } from '@/components/dashboard/student-dashboard-view';
 import { MarksReviewQueue } from '@/components/dashboard/marks-review-queue';
 import { useTaskEvents, TASK_EVENTS } from '@/lib/use-socket';
+import { NavIcon } from '@/lib/navigation';
 
-type QuickStat = { label: string; value: string | number; sub?: string; href?: string };
+type Tone = 'blue' | 'emerald' | 'violet' | 'amber' | 'rose' | 'sky';
+type QuickStat = { label: string; value: string | number; sub?: string; href?: string; icon?: string; tone?: Tone };
 
-function StatCard({ label, value, sub, href }: QuickStat) {
+const TONE_CLASSES: Record<Tone, string> = {
+  blue: 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300',
+  emerald: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300',
+  violet: 'bg-violet-50 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300',
+  amber: 'bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300',
+  rose: 'bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300',
+  sky: 'bg-sky-50 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300',
+};
+
+function StatCard({ label, value, sub, href, icon, tone = 'blue' }: QuickStat) {
   const inner = (
-    <Card className={href ? 'transition-shadow hover:shadow-md cursor-pointer' : ''}>
-      <CardContent className="pt-5">
-        <p className="text-3xl font-bold">{value}</p>
-        <p className="mt-1 text-sm font-semibold">{label}</p>
-        {sub && <p className="text-xs text-[hsl(var(--muted-foreground))]">{sub}</p>}
+    <Card className={`h-full ${href ? 'transition hover:border-[hsl(var(--primary))]/40 hover:shadow-md' : ''}`}>
+      <CardContent className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-[hsl(var(--muted-foreground))]">{label}</p>
+          <p className="mt-2 text-[1.75rem] font-bold leading-none tracking-tight tabular-nums">{value}</p>
+          {sub && <p className="mt-2 text-xs text-[hsl(var(--muted-foreground))]">{sub}</p>}
+        </div>
+        {icon && (
+          <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${TONE_CLASSES[tone]}`} aria-hidden="true">
+            <NavIcon name={icon} className="h-5 w-5" />
+          </span>
+        )}
       </CardContent>
     </Card>
   );
-  return href ? <Link href={href}>{inner}</Link> : inner;
+  return href ? (
+    <Link href={href} className="block h-full rounded-[var(--radius)]">
+      {inner}
+    </Link>
+  ) : (
+    inner
+  );
 }
 
-function NavCard({ title, description, href, label }: { title: string; description: string; href: string; label: string }) {
+function NavCard({ title, description, href, label, icon }: { title: string; description: string; href: string; label: string; icon?: string }) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Link className="font-semibold text-[hsl(var(--primary))] underline underline-offset-4" href={href}>
-          {label} →
-        </Link>
+    <Link href={href} className="group block h-full rounded-[var(--radius)]">
+      <Card className="flex h-full flex-col transition group-hover:border-[hsl(var(--primary))]/40 group-hover:shadow-md">
+        <CardContent className="flex flex-1 gap-4">
+          {icon && (
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--sidebar-active))] text-[hsl(var(--sidebar-active-foreground))]" aria-hidden="true">
+              <NavIcon name={icon} className="h-5 w-5" />
+            </span>
+          )}
+          <div className="min-w-0">
+            <h3 className="font-semibold">{title}</h3>
+            <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">{description}</p>
+            <p className="mt-3 text-sm font-semibold text-[hsl(var(--primary))]">
+              {label} <span className="inline-block transition-transform group-hover:translate-x-0.5">→</span>
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
+function SectionHeading({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-2">
+      <div>
+        <h2 className="text-base font-semibold tracking-tight">{title}</h2>
+        {description && <p className="text-sm text-[hsl(var(--muted-foreground))]">{description}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function WelcomeBanner({ eyebrow, title, subtitle, actions }: { eyebrow: string; title: string; subtitle: ReactNode; actions?: ReactNode }) {
+  return (
+    <Card className="relative overflow-hidden border-[hsl(var(--primary))]/20">
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-1/2 bg-gradient-to-l from-[hsl(var(--sidebar-active))] to-transparent" aria-hidden="true" />
+      <CardContent className="relative flex flex-wrap items-center justify-between gap-4 py-6">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[.12em] text-[hsl(var(--primary))]">{eyebrow}</p>
+          <h1 className="mt-1.5 text-2xl font-bold tracking-tight">{title}</h1>
+          <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">{subtitle}</p>
+        </div>
+        {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
       </CardContent>
     </Card>
   );
@@ -143,14 +203,16 @@ function AdminDashboard() {
     <div className="grid gap-8">
       {/* Stat row */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total Students" value={stats?.students ?? '…'} href="/dashboard/students" />
-        <StatCard label="Total Faculty" value={stats?.faculty ?? '…'} href="/dashboard/faculty" />
-        <StatCard label="Departments" value={stats?.departments ?? '…'} href="/dashboard/departments" />
+        <StatCard label="Total Students" value={stats?.students ?? '…'} href="/dashboard/students" icon="students" tone="blue" />
+        <StatCard label="Total Faculty" value={stats?.faculty ?? '…'} href="/dashboard/faculty" icon="faculty" tone="violet" />
+        <StatCard label="Departments" value={stats?.departments ?? '…'} href="/dashboard/departments" icon="department" tone="emerald" />
         <StatCard
           label="Pending Visitors"
           value={pendingVisitors}
           sub="Awaiting approval"
           href="/dashboard/visitors"
+          icon="visitors"
+          tone="amber"
         />
       </div>
 
@@ -172,35 +234,44 @@ function AdminDashboard() {
       )}
 
       {/* Three admin sections */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <NavCard
-          title="Institutional Overview"
-          description="Students, faculty, departments, attendance summary and exam performance across the college."
-          href="/dashboard/institutional-overview"
-          label="Open Overview"
-        />
-        <NavCard
-          title="Task Management"
-          description="Create tasks, assign to HOD or faculty, track progress and review completed work."
-          href="/dashboard/tasks"
-          label="Open Tasks"
-        />
-        <NavCard
-          title="Faculty Performance"
-          description="Review faculty profiles, department placements, and teaching assignments."
-          href="/dashboard/faculty-performance"
-          label="Open Faculty"
-        />
+      <div className="grid gap-3">
+        <SectionHeading title="Administration" description="Where the college's day-to-day management happens." />
+        <div className="grid gap-4 md:grid-cols-3">
+          <NavCard
+            title="Institutional Overview"
+            description="Students, faculty, departments, attendance summary and exam performance across the college."
+            href="/dashboard/institutional-overview"
+            label="Open overview"
+            icon="analytics"
+          />
+          <NavCard
+            title="Task Management"
+            description="Create tasks, assign them to HODs or faculty, track progress and review completed work."
+            href="/dashboard/tasks"
+            label="Open tasks"
+            icon="tasks"
+          />
+          <NavCard
+            title="Faculty Performance"
+            description="Classes, attendance marked, work waiting for evaluation and overdue tasks for each faculty member."
+            href="/dashboard/faculty-performance"
+            label="Open report"
+            icon="performance"
+          />
+        </div>
       </div>
 
       {/* Task summary */}
       {taskStats && (
-        <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
-          <StatCard label="Pending Tasks" value={taskStats.pending} />
-          <StatCard label="In Progress" value={taskStats.inProgress} />
-          <StatCard label="Submitted" value={taskStats.submitted} sub="Awaiting review" />
-          <StatCard label="Approved" value={taskStats.approved} />
-          <StatCard label="Needs Rework" value={taskStats.rework} />
+        <div className="grid gap-3">
+          <SectionHeading title="Task progress" description="Tasks you have assigned, by status." />
+          <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
+            <StatCard label="Pending Tasks" value={taskStats.pending} href="/dashboard/tasks" />
+            <StatCard label="In Progress" value={taskStats.inProgress} href="/dashboard/tasks" />
+            <StatCard label="Submitted" value={taskStats.submitted} sub="Awaiting review" href="/dashboard/tasks" />
+            <StatCard label="Approved" value={taskStats.approved} href="/dashboard/tasks" />
+            <StatCard label="Needs Rework" value={taskStats.rework} href="/dashboard/tasks" />
+          </div>
         </div>
       )}
     </div>
@@ -281,27 +352,21 @@ function HodDashboard() {
   return (
     <div className="grid gap-8">
       {/* Welcome banner */}
-      <Card className="border-[hsl(var(--primary))]/30 bg-[hsl(var(--primary))]/5">
-        <CardContent className="flex flex-wrap items-center justify-between gap-4 pt-5">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-[hsl(var(--primary))]">
-              {deptName ?? 'Department'} · HOD Portal
-            </p>
-            <p className="mt-1 text-xl font-semibold">
-              {greeting}, {user?.displayName ?? 'HOD'}
-            </p>
-            <p className="mt-0.5 text-sm text-[hsl(var(--muted-foreground))]">{today}</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
+      <WelcomeBanner
+        eyebrow={`${deptName ?? 'Department'} · HOD Portal`}
+        title={`${greeting}, ${user?.displayName ?? 'HOD'}`}
+        subtitle={today}
+        actions={
+          <>
             <Link href="/dashboard/tasks/new">
               <Button>+ Create Task</Button>
             </Link>
             <Link href="/dashboard/hod-overview">
               <Button variant="outline">Department Overview</Button>
             </Link>
-          </div>
-        </CardContent>
-      </Card>
+          </>
+        }
+      />
 
       <MarksReviewQueue />
 
@@ -329,10 +394,10 @@ function HodDashboard() {
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard label="Faculty in Department" value={faculty.length} href="/dashboard/faculty" />
-          <StatCard label="Pending Tasks" value={taskStats?.pending ?? 0} href="/dashboard/tasks" />
-          <StatCard label="Submissions to Review" value={submittedTasks.length} sub="Awaiting your review" href="/dashboard/tasks" />
-          <StatCard label="Pending Visitors" value={pendingVisitors} sub="Awaiting approval" href="/dashboard/visitors" />
+          <StatCard label="Faculty in Department" value={faculty.length} href="/dashboard/faculty" icon="faculty" tone="violet" />
+          <StatCard label="Pending Tasks" value={taskStats?.pending ?? 0} href="/dashboard/tasks" icon="tasks" tone="blue" />
+          <StatCard label="Submissions to Review" value={submittedTasks.length} sub="Awaiting your review" href="/dashboard/tasks" icon="assignments" tone="emerald" />
+          <StatCard label="Pending Visitors" value={pendingVisitors} sub="Awaiting approval" href="/dashboard/visitors" icon="visitors" tone="amber" />
         </div>
       )}
 
@@ -389,9 +454,9 @@ function HodDashboard() {
 
         {/* Quick navigation */}
         <div className="grid gap-4 content-start">
-          <NavCard title="Task Management" description="Create, assign, and review departmental tasks." href="/dashboard/tasks" label="Open Tasks" />
-          <NavCard title="Visitor Approvals" description="Review and approve campus visitor requests." href="/dashboard/visitors" label="Open Visitors" />
-          <NavCard title="Attendance" description="Mark and review attendance for department classes." href="/dashboard/attendance" label="Open Attendance" />
+          <NavCard title="Task Management" description="Create, assign, and review departmental tasks." href="/dashboard/tasks" label="Open Tasks" icon="tasks" />
+          <NavCard title="Visitor Approvals" description="Review and approve campus visitor requests." href="/dashboard/visitors" label="Open Visitors" icon="visitors" />
+          <NavCard title="Attendance" description="Mark and review attendance for department classes." href="/dashboard/attendance" label="Open Attendance" icon="attendance" />
         </div>
       </div>
 
@@ -424,9 +489,9 @@ function HodDashboard() {
 
       {/* Academic modules */}
       <div className="grid gap-4 md:grid-cols-3">
-        <NavCard title="Exams & Results" description="Schedule exams and manage marks for your department." href="/dashboard/exams" label="Open Exams" />
-        <NavCard title="Assignments" description="Publish coursework and grade student submissions." href="/dashboard/assignments" label="Open Assignments" />
-        <NavCard title="Timetable" description="Manage class timetables for your department." href="/dashboard/timetable" label="Open Timetable" />
+        <NavCard title="Exams & Results" description="Schedule exams and review marks for your department." href="/dashboard/exams" label="Open Exams" icon="exams" />
+        <NavCard title="Assignments" description="Coursework published in your department and its submissions." href="/dashboard/assignments" label="Open Assignments" icon="assignments" />
+        <NavCard title="Timetable" description="Class timetables for your department." href="/dashboard/timetable" label="Open Timetable" icon="timetable" />
       </div>
     </div>
   );
@@ -586,20 +651,16 @@ function FacultyDashboard() {
   return (
     <div className="grid gap-8">
       {/* A. Welcome Banner */}
-      <Card className="border-[hsl(var(--primary))]/30 bg-[hsl(var(--primary))]/5">
-        <CardContent className="flex flex-wrap items-center justify-between gap-4 pt-5">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-[hsl(var(--primary))]">
-              {faculty?.department?.name ?? 'Department'} · Faculty Portal
-            </p>
-            <p className="mt-1 text-2xl font-semibold">
-              {greeting}, {facultyDisplayName}
-            </p>
-            <p className="mt-0.5 text-sm text-[hsl(var(--muted-foreground))]">
-              {todayDateString} · Employee Code: <span className="font-medium text-[hsl(var(--foreground))]">{faculty?.employeeCode ?? '—'}</span>
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
+      <WelcomeBanner
+        eyebrow={`${faculty?.department?.name ?? 'Department'} · Faculty Portal`}
+        title={`${greeting}, ${facultyDisplayName}`}
+        subtitle={
+          <>
+            {todayDateString} · Employee Code: <span className="font-medium text-[hsl(var(--foreground))]">{faculty?.employeeCode ?? '—'}</span>
+          </>
+        }
+        actions={
+          <>
             <Link href="/dashboard/attendance/new">
               <Button>+ Mark Attendance</Button>
             </Link>
@@ -609,12 +670,9 @@ function FacultyDashboard() {
             <Link href="/dashboard/tasks">
               <Button variant="outline">My Tasks</Button>
             </Link>
-            <Link href="/dashboard/faculty/me">
-              <Button variant="outline">My Profile</Button>
-            </Link>
-          </div>
-        </CardContent>
-      </Card>
+          </>
+        }
+      />
 
       {/* Notifications */}
       {actionError && (
@@ -637,13 +695,13 @@ function FacultyDashboard() {
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
-          <StatCard label="Today's Classes" value={todayClasses.length} href="/dashboard/timetable" />
-          <StatCard label="Attendance Pending" value={attendancePending} sub={attendancePending > 0 ? 'Not marked today' : 'All marked'} href="/dashboard/attendance/new" />
-          <StatCard label="Teaching Classes" value={myClasses?.length ?? classes.length} href="/dashboard/classes" />
-          <StatCard label="Students" value={studentsTaught ?? '—'} sub="In your classes" href="/dashboard/classes" />
-          <StatCard label="Active Assignments" value={activeAssignments} href="/dashboard/assignments" />
-          <StatCard label="To Evaluate" value={toEvaluate ?? '—'} sub="Submissions awaiting marks" href="/dashboard/classes" />
-          <StatCard label="Pending Tasks" value={taskStats?.pending ?? 0} href="/dashboard/tasks" />
+          <StatCard label="Today's Classes" value={todayClasses.length} href="/dashboard/timetable" icon="timetable" tone="blue" />
+          <StatCard label="Attendance Pending" value={attendancePending} sub={attendancePending > 0 ? 'Not marked today' : 'All marked'} href="/dashboard/attendance/new" icon="attendance" tone={attendancePending > 0 ? 'amber' : 'emerald'} />
+          <StatCard label="Teaching Classes" value={myClasses?.length ?? classes.length} href="/dashboard/classes" icon="classes" tone="violet" />
+          <StatCard label="Students" value={studentsTaught ?? '—'} sub="In your classes" href="/dashboard/classes" icon="students" tone="sky" />
+          <StatCard label="Active Assignments" value={activeAssignments} href="/dashboard/assignments" icon="assignments" tone="blue" />
+          <StatCard label="To Evaluate" value={toEvaluate ?? '—'} sub="Submissions awaiting marks" href="/dashboard/classes" icon="exams" tone="amber" />
+          <StatCard label="Pending Tasks" value={taskStats?.pending ?? 0} href="/dashboard/tasks" icon="tasks" tone="rose" />
         </div>
       )}
 
@@ -1174,20 +1232,28 @@ export default function DashboardPage() {
     return 'Good evening';
   })();
 
+  const today = new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+  // HOD, Faculty and Student dashboards open with their own welcome banner; Admin gets the same banner here.
   return (
     <div className="grid gap-6">
-      <div>
-        <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">CampusOS</p>
-        <h1 className="mt-2 text-3xl font-semibold">
-          {greeting}, {user?.displayName ?? primaryRole}
-        </h1>
-        <p className="mt-2 max-w-2xl text-[hsl(var(--muted-foreground))]">
-          {primaryRole === 'Admin' && 'College administration portal. Manage institutional operations.'}
-          {primaryRole === 'HOD' && 'Department management portal. Oversee faculty and department operations.'}
-          {primaryRole === 'Faculty' && 'Faculty workspace. Manage your tasks, classes, and students.'}
-          {primaryRole === 'Student' && 'Student workspace. Access your courses, assignments, and grades.'}
-        </p>
-      </div>
+      {primaryRole === 'Admin' && (
+        <WelcomeBanner
+          eyebrow="Administration · Admin Portal"
+          title={`${greeting}, ${user?.displayName ?? 'Admin'}`}
+          subtitle={`${today} · College administration and institutional operations`}
+          actions={
+            <>
+              <Link href="/dashboard/tasks/new">
+                <Button>+ Create Task</Button>
+              </Link>
+              <Link href="/dashboard/institutional-overview">
+                <Button variant="outline">Institutional Overview</Button>
+              </Link>
+            </>
+          }
+        />
+      )}
 
       {primaryRole === 'Admin' && <AdminDashboard />}
       {primaryRole === 'HOD' && <HodDashboard />}
