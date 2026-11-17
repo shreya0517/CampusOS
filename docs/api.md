@@ -42,6 +42,7 @@ All authentication endpoints are under `/api/v1/auth`. Registration and login re
 - `POST /api/v1/auth/verify-email`: accepts `{ "token" }`, consumes an opaque email-verification token, and returns `204`.
 - `POST /api/v1/auth/forgot-password`: accepts `{ "collegeCode", "email" }`, always returns `204`, and creates a reset-token record only for an existing account.
 - `POST /api/v1/auth/reset-password`: accepts `{ "token", "password" }` with a password of at least 12 characters, returns `204`, and invalidates all existing sessions for the account.
+- `POST /api/v1/auth/change-password`: requires a bearer access token and accepts `{ "currentPassword", "newPassword" }`. The new password needs at least 12 characters and must differ from the current one. Returns `204`, keeps the calling session and revokes every other session of the user. A wrong current password returns `400 INVALID_CURRENT_PASSWORD` (not 401, so clients don't treat it as an expired session); an invalid new password returns `400 INVALID_NEW_PASSWORD`.
 
 Malformed authentication request bodies return `400 { "code": "INVALID_INPUT", "message": "Request body is invalid." }`. Invalid login credentials return `401 INVALID_CREDENTIALS`; expired, revoked, or missing sessions return `401 SESSION_EXPIRED` (or `401 UNAUTHORIZED` when a bearer token is absent).
 
@@ -91,12 +92,13 @@ All student endpoints require a bearer access token and derive tenant, role, and
 
 - POST /api/v1/students: ADMIN/HOD creates a student and initial section enrollment. Body: { studentCode, firstName, lastName, dateOfBirth?, sectionId }.
 - GET /api/v1/students: ADMIN/HOD/FACULTY list scoped students. Supports search, departmentId, courseId, semesterId, sectionId, page, and pageSize.
-- GET /api/v1/students/me: STUDENT retrieves only its linked profile.
+- GET /api/v1/students/me: STUDENT retrieves only its linked profile, including the college name and the account email and status.
+- PUT /api/v1/students/me: STUDENT updates only their own phone and address. Body: { phone?, address? }; at least one is required, null or an empty string clears it, and every other field is ignored. Phone takes 8 to 20 digits with optional spaces, dashes and a leading +; address takes up to 300 characters.
 - GET /api/v1/students/:id: scoped profile read. STUDENT can only read their own profile.
 - PUT /api/v1/students/:id: ADMIN/HOD update profile fields.
 - POST /api/v1/students/:id/enrollments: ADMIN/HOD add or update a section enrollment. Body: { sectionId, status? }.
 
-HOD and FACULTY access is restricted to students whose enrolled section belongs to their authenticated faculty department. Association requests validate that the section belongs to the authenticated college and department; cross-college and cross-department IDs return 403 FORBIDDEN without resource details.
+FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD and FACULTY access is restricted to students whose enrolled section belongs to their authenticated faculty department. Association requests validate that the section belongs to the authenticated college and department; cross-college and cross-department IDs return 403 FORBIDDEN without resource details.
 
 ## Student Attendance
 
