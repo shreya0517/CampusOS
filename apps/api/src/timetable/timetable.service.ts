@@ -45,7 +45,8 @@ export class TimetableService {
   constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
 
   async createEntry(input: CreateTimetableDto, context: AuthorizationContext) {
-    if (context.roles.includes('STUDENT')) denied();
+    // Timetables are built by Admin (HOD decision 3: no recommendation in the spec, so the most restrictive option).
+    if (!context.roles.includes('ADMIN')) denied();
 
     const targetClass = await this.database.class.findFirst({
       where: { id: input.classId, collegeId: context.collegeId },
@@ -188,6 +189,15 @@ export class TimetableService {
       if (query.facultyId) classWhere.facultyId = query.facultyId;
       where.class = classWhere;
     }
+    const isAdmin = context.roles.includes('ADMIN') || context.roles.includes('SUPER_ADMIN');
+    if (!isAdmin && context.roles.includes('HOD')) {
+      // HODs see their own department's timetable.
+      if (!context.departmentId) return { items: [], total: 0, page: query.page, pageSize: query.pageSize, totalPages: 1 };
+      where.class = { ...((where.class as Record<string, unknown> | undefined) ?? {}), section: { semester: { course: { departmentId: context.departmentId } } } };
+    } else if (!isAdmin && context.roles.includes('FACULTY')) {
+      // Faculty see only the classes they teach.
+      where.class = { ...((where.class as Record<string, unknown> | undefined) ?? {}), faculty: { userId: context.userId } };
+    }
     if (this.isStudentOnly(context)) {
       // Students only see the timetable of the sections they are enrolled in.
       const sectionIds = await this.studentSectionIds(context);
@@ -279,7 +289,7 @@ export class TimetableService {
       });
     }
 
-    if (context.roles.includes('FACULTY')) {
+    if (context.roles.includes('FACULTY') || (context.roles.includes('HOD') && !context.roles.includes('ADMIN'))) {
       const faculty = await this.database.faculty.findFirst({
         where: { collegeId: context.collegeId, userId: context.userId },
       });
@@ -312,7 +322,7 @@ export class TimetableService {
       });
     }
 
-    // Default for Admin / HOD
+    // Default for Admin
     return this.database.timetable.findMany({
       where: { collegeId: context.collegeId },
       orderBy: [
@@ -334,7 +344,7 @@ export class TimetableService {
   }
 
   async deleteEntry(id: string, context: AuthorizationContext) {
-    if (context.roles.includes('STUDENT')) denied();
+    if (!context.roles.includes('ADMIN')) denied();
 
     const existing = await this.database.timetable.findFirst({
       where: { id, collegeId: context.collegeId },

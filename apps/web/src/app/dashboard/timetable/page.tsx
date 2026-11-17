@@ -37,7 +37,8 @@ function formatTime(dateOrStr: string): string {
 
 export default function TimetablePage() {
   const { primaryRole } = useAuth();
-  const isStaff = primaryRole === 'Admin' || primaryRole === 'HOD' || primaryRole === 'Faculty';
+  // Only Admin builds and changes timetables; HOD and faculty view them.
+  const canEdit = primaryRole === 'Admin';
   const isStudent = primaryRole === 'Student';
 
   const [activeTab, setActiveTab] = useState<'my' | 'all'>(isStudent ? 'my' : 'all');
@@ -112,7 +113,7 @@ export default function TimetablePage() {
             Schedule and view weekly class sessions, rooms, faculty assignments, and time slots.
           </p>
         </div>
-        {isStaff && (
+        {canEdit && (
           <Link href="/dashboard/timetable/new">
             <Button className="w-full sm:w-auto">+ Schedule Entry</Button>
           </Link>
@@ -209,7 +210,7 @@ export default function TimetablePage() {
                   : 'No entries match the selected day or room filter.'
               }
               action={
-                isStaff ? (
+                canEdit ? (
                   <Link href="/dashboard/timetable/new">
                     <Button variant="outline">+ Create Entry</Button>
                   </Link>
@@ -268,7 +269,7 @@ export default function TimetablePage() {
                               </div>
                             </div>
 
-                            {isStaff && (
+                            {canEdit && (
                               <div className="mt-4 flex justify-end">
                                 <Button
                                   variant="ghost"

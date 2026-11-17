@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { TaskStatus } from '@prisma/client';
 import { DatabaseService } from '../database.service';
 import { EventsService } from '../events/events.service';
@@ -195,20 +195,41 @@ export class TasksService {
     return { success: true };
   }
 
+  /** Tasks go to active HOD and faculty accounts in the college; an HOD may only assign within their own department. */
+  private async assertAssignable(assigneeUserId: string, context: AuthorizationContext): Promise<void> {
+    const assignee = await this.database.user.findFirst({
+      where: { id: assigneeUserId, collegeId: context.collegeId, status: 'ACTIVE', userRoles: { some: { role: { name: { in: ['HOD', 'FACULTY'] } } } } },
+      select: { facultyProfiles: { select: { departmentId: true } } },
+    });
+    if (!assignee) {
+      throw new BadRequestException({ code: 'INVALID_ASSIGNEE', message: 'Tasks can only be assigned to active HOD or faculty accounts.' });
+    }
+    if (this.isHod(context) && !this.isAdmin(context) && assignee.facultyProfiles[0]?.departmentId !== this.hodDepartmentId(context)) denied();
+  }
+
   async assignTask(taskId: string, input: AssignTaskDto, context: AuthorizationContext): Promise<unknown> {
     this.requireAdminOrHod(context);
     const task = await this.getTask(taskId, context) as Record<string, unknown>;
+    await this.assertAssignable(input.assigneeUserId, context);
 
-    const assignment = await this.database.taskAssignment.create({
-      data: {
-        collegeId: context.collegeId,
-        taskId,
-        assigneeUserId: input.assigneeUserId,
-        notes: input.notes,
-        status: TaskStatus.PENDING,
-      },
-      include: assignmentInclude,
-    });
+    let assignment;
+    try {
+      assignment = await this.database.taskAssignment.create({
+        data: {
+          collegeId: context.collegeId,
+          taskId,
+          assigneeUserId: input.assigneeUserId,
+          notes: input.notes,
+          status: TaskStatus.PENDING,
+        },
+        include: assignmentInclude,
+      });
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && (error as { code?: string }).code === 'P2002') {
+        throw new ConflictException({ code: 'ALREADY_ASSIGNED', message: 'This task is already assigned to that person.' });
+      }
+      throw error;
+    }
 
     this.events.emitTaskAssigned(
       this.buildPayload(task, context, `Task assigned: ${(task as { title?: string }).title ?? taskId}`, {
