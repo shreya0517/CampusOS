@@ -4,6 +4,7 @@ import { EnrollmentStatus } from '@prisma/client';
 export type CreateStudentDto = { studentCode: string; firstName: string; lastName: string; dateOfBirth?: Date; sectionId: string };
 export type UpdateStudentDto = { firstName?: string; lastName?: string; dateOfBirth?: Date | null };
 export type EnrollmentDto = { sectionId: string; status?: EnrollmentStatus };
+export type UpdateMyContactDto = { phone?: string | null; address?: string | null };
 export type StudentListQuery = { search?: string; departmentId?: string; courseId?: string; semesterId?: string; sectionId?: string; page: number; pageSize: number };
 
 type Body = Record<string, unknown>;
@@ -16,4 +17,20 @@ const date = (value: unknown): Date => { const parsed = new Date(string(value));
 export const parseCreateStudentDto = (value: unknown): CreateStudentDto => { const body = object(value); return { studentCode: string(body.studentCode), firstName: string(body.firstName, 2), lastName: string(body.lastName, 2), dateOfBirth: body.dateOfBirth === undefined ? undefined : date(body.dateOfBirth), sectionId: string(body.sectionId) }; };
 export const parseUpdateStudentDto = (value: unknown): UpdateStudentDto => { const body = object(value); const result = { firstName: optionalString(body.firstName), lastName: optionalString(body.lastName), dateOfBirth: body.dateOfBirth === undefined ? undefined : body.dateOfBirth === null ? null : date(body.dateOfBirth) }; if (result.firstName === undefined && result.lastName === undefined && result.dateOfBirth === undefined) invalid(); if (result.firstName !== undefined && result.firstName.length < 2 || result.lastName !== undefined && result.lastName.length < 2) invalid(); return result; };
 export const parseEnrollmentDto = (value: unknown): EnrollmentDto => { const body = object(value); const status = body.status === undefined ? undefined : string(body.status); if (status !== undefined && !Object.values(EnrollmentStatus).includes(status as EnrollmentStatus)) invalid(); return { sectionId: string(body.sectionId), status: status as EnrollmentStatus | undefined }; };
+/** Students may only change their own phone and address. An empty string clears the field. */
+export const parseUpdateMyContactDto = (value: unknown): UpdateMyContactDto => {
+  const body = object(value);
+  const clearable = (input: unknown): string | null | undefined => {
+    if (input === undefined) return undefined;
+    if (input === null) return null;
+    if (typeof input !== 'string') return invalid();
+    return input.trim() === '' ? null : input.trim();
+  };
+  const phone = clearable(body.phone);
+  const address = clearable(body.address);
+  if (phone === undefined && address === undefined) invalid();
+  if (typeof phone === 'string' && !/^\+?[0-9][0-9 -]{6,18}[0-9]$/.test(phone)) invalid();
+  if (typeof address === 'string' && address.length > 300) invalid();
+  return { phone, address };
+};
 export const parseStudentListQuery = (value: unknown): StudentListQuery => { const query = object(value); const integer = (input: unknown, fallback: number, max: number) => { if (input === undefined) return fallback; const parsed = Number(input); return Number.isInteger(parsed) && parsed > 0 && parsed <= max ? parsed : invalid(); }; return { search: optionalString(query.search), departmentId: optionalString(query.departmentId), courseId: optionalString(query.courseId), semesterId: optionalString(query.semesterId), sectionId: optionalString(query.sectionId), page: integer(query.page, 1, 10_000), pageSize: integer(query.pageSize, 20, 100) }; };
