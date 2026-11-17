@@ -111,3 +111,38 @@ describe('AssignmentsService', () => {
     await expect(service.gradeSubmission('ass-1', 'sub-1', { marksAwarded: 150 }, faculty)).rejects.toBeInstanceOf(BadRequestException);
   });
 });
+
+describe('AssignmentsService student list', () => {
+  const database = {
+    student: { findFirst: jest.fn() },
+    assignment: { findMany: jest.fn(), count: jest.fn().mockResolvedValue(1) },
+  };
+  const service = new AssignmentsService(database as never);
+  beforeEach(() => jest.clearAllMocks());
+
+  it('gives students their own submission instead of a count of everyone else', async () => {
+    database.student.findFirst.mockResolvedValue({ id: 'stu-1' });
+    database.assignment.findMany.mockResolvedValue([{ ...mockAssignment, submissions: [{ id: 'sub-1', status: 'SUBMITTED' }] }]);
+    const result = await service.listAssignments({ page: 1, pageSize: 20 }, student);
+    const args = database.assignment.findMany.mock.calls[0][0] as { include: Record<string, unknown> };
+    expect(args.include.submissions).toEqual({ where: { collegeId: 'col-a', studentId: 'stu-1' }, take: 1 });
+    expect(args.include._count).toBeUndefined();
+    expect(result.items[0]).toMatchObject({ mySubmission: { id: 'sub-1', status: 'SUBMITTED' } });
+    expect(result.items[0]).not.toHaveProperty('submissions');
+  });
+
+  it('returns null when the student has not submitted', async () => {
+    database.student.findFirst.mockResolvedValue({ id: 'stu-1' });
+    database.assignment.findMany.mockResolvedValue([{ ...mockAssignment, submissions: [] }]);
+    const result = await service.listAssignments({ page: 1, pageSize: 20 }, student);
+    expect(result.items[0]).toMatchObject({ mySubmission: null });
+  });
+
+  it('keeps the submission count for staff', async () => {
+    database.assignment.findMany.mockResolvedValue([]);
+    await service.listAssignments({ page: 1, pageSize: 20 }, admin);
+    const args = database.assignment.findMany.mock.calls[0][0] as { include: Record<string, unknown> };
+    expect(args.include._count).toEqual({ select: { submissions: true } });
+    expect(database.student.findFirst).not.toHaveBeenCalled();
+  });
+});

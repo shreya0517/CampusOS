@@ -119,6 +119,26 @@ export class AssignmentsService {
       ];
     }
 
+    if (!context.roles.includes('ADMIN') && context.roles.includes('STUDENT')) {
+      // Students get their own submission on each assignment, not a count of everyone's submissions.
+      const student = await this.database.student.findFirst({ where: { collegeId: context.collegeId, userId: context.userId }, select: { id: true } });
+      if (!student) return { items: [], total: 0, page: query.page, pageSize: query.pageSize };
+      const [items, total] = await Promise.all([
+        this.database.assignment.findMany({
+          where,
+          include: {
+            ...assignmentInclude,
+            submissions: { where: { collegeId: context.collegeId, studentId: student.id }, take: 1 },
+          },
+          orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
+          skip: (query.page - 1) * query.pageSize,
+          take: query.pageSize,
+        }),
+        this.database.assignment.count({ where }),
+      ]);
+      return { items: items.map(({ submissions, ...item }) => ({ ...item, mySubmission: submissions[0] ?? null })), total, page: query.page, pageSize: query.pageSize };
+    }
+
     const [items, total] = await Promise.all([
       this.database.assignment.findMany({
         where,
