@@ -7,6 +7,9 @@ import type { AttendanceListQuery, ClassListQuery, CreateAttendanceDto, MyAttend
 /** Minimum attendance a student needs per subject; the dashboard already shows this as the college policy. */
 export const ATTENDANCE_THRESHOLD_PERCENT = 75;
 
+/** Faculty may correct a session for this long after first marking it; later corrections go through the HOD. */
+export const ATTENDANCE_CORRECTION_WINDOW_HOURS = 48;
+
 const denied = (): never => { throw new ForbiddenException({ code: 'FORBIDDEN', message: 'You are not authorized to access this resource.' }); };
 const missing = (): never => { throw new NotFoundException({ code: 'ATTENDANCE_NOT_FOUND', message: 'Attendance session was not found.' }); };
 const classMissing = (): never => { throw new NotFoundException({ code: 'CLASS_NOT_FOUND', message: 'Class was not found.' }); };
@@ -67,18 +70,20 @@ export class AttendanceService {
     const cls = await this.resolveClass(input.classId, context);
     await this.assertStudentsInSection(cls.sectionId, input.records.map((r) => r.studentId), context);
     try {
-      const attendance = await this.database.attendance.create({
-        data: {
-          collegeId: context.collegeId,
-          classId: input.classId,
-          heldOn: new Date(input.heldOn),
-          records: {
-            create: input.records.map((r) => ({ collegeId: context.collegeId, studentId: r.studentId, status: r.status, note: r.note })),
-          },
-        },
-        include: attendanceInclude,
+      const attendance = await this.database.$transaction(async (tx) => {
+        // Records are written with createMany, as in updates: a nested create can't set collegeId, which the
+        // record's composite relations need, so Prisma rejected every new session.
+        const session = await tx.attendance.create({ data: { collegeId: context.collegeId, classId: input.classId, heldOn: new Date(input.heldOn) } });
+        await tx.attendanceRecord.createMany({
+          data: input.records.map((r) => ({ collegeId: context.collegeId, attendanceId: session.id, studentId: r.studentId, status: r.status, note: r.note })),
+        });
+        const created = await tx.attendance.findFirstOrThrow({ where: { id: session.id, collegeId: context.collegeId }, include: attendanceInclude });
+        await tx.auditLog.create({
+          data: { collegeId: context.collegeId, actorId: context.userId, action: 'ATTENDANCE_MARKED', entityType: 'Attendance', entityId: created.id, metadata: { classId: created.classId, records: created.records.length } },
+        });
+        return created;
       });
-      return attendance;
+      return withCorrectionWindow(attendance);
     } catch (error) {
       if (isUnique(error)) throw new ConflictException({ code: 'ATTENDANCE_EXISTS', message: 'Attendance for this class on this date already exists.' });
       throw error;
@@ -105,7 +110,7 @@ export class AttendanceService {
     if (context.roles.includes('STUDENT')) denied();
     const item = await this.database.attendance.findFirst({ where: { id, collegeId: context.collegeId, class: this.classWhere(context) }, include: attendanceInclude });
     if (!item) missing();
-    return item!;
+    return withCorrectionWindow(item!);
   }
 
   /**
@@ -165,14 +170,48 @@ export class AttendanceService {
   async updateAttendance(id: string, input: UpdateAttendanceDto, context: AuthorizationContext) {
     if (context.roles.includes('STUDENT')) denied();
     const attendance = await this.getAttendance(id, context);
+    const facultyOnly = context.roles.includes('FACULTY') && !context.roles.includes('HOD') && !context.roles.includes('ADMIN');
+    if (facultyOnly && new Date() > new Date(attendance.correctionWindowEndsAt)) {
+      throw new ForbiddenException({ code: 'CORRECTION_WINDOW_CLOSED', message: `Attendance can only be corrected within ${ATTENDANCE_CORRECTION_WINDOW_HOURS} hours of being marked. Ask your HOD to correct it.` });
+    }
     await this.assertStudentsInSection(attendance.class.sectionId, input.records.map((r) => r.studentId), context);
+    const before = new Map(attendance.records.map((r) => [r.studentId, { status: r.status, note: r.note ?? null }]));
+    const changes = input.records
+      .map((r) => ({ studentId: r.studentId, from: before.get(r.studentId) ?? null, to: { status: r.status, note: r.note ?? null } }))
+      .filter((change) => change.from?.status !== change.to.status || change.from?.note !== change.to.note);
     await this.database.$transaction(async (tx) => {
       await tx.attendanceRecord.deleteMany({ where: { collegeId: context.collegeId, attendanceId: attendance.id } });
       await tx.attendanceRecord.createMany({
         data: input.records.map((r) => ({ collegeId: context.collegeId, attendanceId: attendance.id, studentId: r.studentId, status: r.status, note: r.note })),
       });
+      if (changes.length > 0) {
+        await tx.auditLog.create({
+          data: { collegeId: context.collegeId, actorId: context.userId, action: 'ATTENDANCE_CORRECTED', entityType: 'Attendance', entityId: attendance.id, metadata: { changes } },
+        });
+      }
     });
     return this.getAttendance(id, context);
+  }
+
+  /** Who marked and corrected a session, oldest first, for anyone allowed to open the session. */
+  async getAttendanceHistory(id: string, context: AuthorizationContext) {
+    const attendance = await this.getAttendance(id, context);
+    const students = new Map(attendance.records.map((r) => [r.studentId, r.student]));
+    const entries = await this.database.auditLog.findMany({
+      where: { collegeId: context.collegeId, entityType: 'Attendance', entityId: attendance.id },
+      include: { actor: { select: { id: true, displayName: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return entries.map((entry) => {
+      const metadata = (entry.metadata ?? {}) as { changes?: Array<{ studentId: string; from: { status: string; note: string | null } | null; to: { status: string; note: string | null } }> };
+      return {
+        id: entry.id,
+        action: entry.action,
+        createdAt: entry.createdAt,
+        actor: entry.actor,
+        changes: (metadata.changes ?? []).map((change) => ({ ...change, student: students.get(change.studentId) ?? null })),
+      };
+    });
   }
 }
 
@@ -229,5 +268,11 @@ export const summarize = (tally: Tally) => {
 };
 
 const dateKey = (date: Date): string => date.toISOString().slice(0, 10);
+
+/** Adds when the faculty correction window closes, counted from when the session was first saved. */
+const withCorrectionWindow = <T extends { createdAt: Date }>(attendance: T): T & { correctionWindowEndsAt: string } => ({
+  ...attendance,
+  correctionWindowEndsAt: new Date(attendance.createdAt.getTime() + ATTENDANCE_CORRECTION_WINDOW_HOURS * 3_600_000).toISOString(),
+});
 
 const isUnique = (error: unknown): boolean => typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'P2002';

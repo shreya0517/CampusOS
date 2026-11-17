@@ -10,13 +10,15 @@ const faculty: AuthorizationContext = { userId: 'faculty-user', collegeId: 'col-
 const student: AuthorizationContext = { userId: 'stu', collegeId: 'col-a', roles: ['STUDENT'], permissions: [], departmentId: null };
 
 const mockClass = { id: 'class-a', collegeId: 'col-a', sectionId: 'sec-a', subjectId: 'subj-a', facultyId: 'faculty-user', section: { semester: { course: { departmentId: 'dept-a' } } }, subject: {}, faculty: {} };
-const mockAttendance = { id: 'att-a', collegeId: 'col-a', classId: 'class-a', heldOn: new Date('2026-09-01'), class: mockClass, records: [] };
+const mockAttendance = { id: 'att-a', collegeId: 'col-a', classId: 'class-a', heldOn: new Date('2026-09-01'), createdAt: new Date(), class: mockClass, records: [] as Array<{ studentId: string; status: AttendanceStatus; note: string | null; student: { id: string; firstName: string; lastName: string; studentCode: string } }> };
 
 describe('AttendanceService', () => {
-  const tx = { attendanceRecord: { deleteMany: jest.fn(), createMany: jest.fn() } };
+  const attendance = { create: jest.fn(), findFirst: jest.fn(), findFirstOrThrow: jest.fn(), findMany: jest.fn(), count: jest.fn() };
+  const tx = { attendanceRecord: { deleteMany: jest.fn(), createMany: jest.fn() }, attendance, auditLog: { create: jest.fn() } };
   const database = {
     class: { findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn() },
-    attendance: { create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn() },
+    attendance,
+    auditLog: { findMany: jest.fn() },
     attendanceRecord: { deleteMany: jest.fn(), createMany: jest.fn(), findMany: jest.fn() },
     student: { findFirst: jest.fn() },
     enrollment: { findMany: jest.fn().mockResolvedValue([{ studentId: 'stu-a' }]) },
@@ -66,9 +68,10 @@ describe('AttendanceService', () => {
 
   it('creates attendance and surfaces conflict on duplicate date', async () => {
     database.class.findFirst.mockResolvedValue(mockClass);
-    database.attendance.create.mockResolvedValue(mockAttendance);
+    database.attendance.create.mockResolvedValue({ id: 'att-a' });
+    attendance.findFirstOrThrow.mockResolvedValue(mockAttendance);
     const result = await service.createAttendance({ classId: 'class-a', heldOn: '2026-09-01', records: [{ studentId: 'stu-a', status: AttendanceStatus.PRESENT }] }, admin);
-    expect(result).toEqual(mockAttendance);
+    expect(result).toEqual({ ...mockAttendance, correctionWindowEndsAt: expect.any(String) });
     database.attendance.create.mockRejectedValueOnce({ code: 'P2002' });
     await expect(service.createAttendance({ classId: 'class-a', heldOn: '2026-09-01', records: [{ studentId: 'stu-a', status: AttendanceStatus.PRESENT }] }, admin)).rejects.toBeInstanceOf(ConflictException);
   });
@@ -183,6 +186,63 @@ describe('AttendanceService', () => {
       expect(parseMyAttendanceQuery({ from: '2028-02-29' }).from).toBe('2028-02-29');
       expect(() => parseMyAttendanceQuery({ from: '2026-10-31', to: '2026-10-01' })).toThrow();
       expect(parseMyAttendanceQuery({ subjectId: 'subj-os', from: '2026-10-01', to: '2026-10-31' })).toEqual({ subjectId: 'subj-os', from: '2026-10-01', to: '2026-10-31', page: 1, pageSize: 20 });
+    });
+  });
+
+  describe('corrections', () => {
+    const hoursAgo = (hours: number): Date => new Date(Date.now() - hours * 3_600_000);
+    const marked = (createdAt: Date) => ({
+      ...mockAttendance,
+      createdAt,
+      records: [{ studentId: 'stu-a', status: AttendanceStatus.PRESENT, note: null, student: { id: 'stu-a', firstName: 'Aarav', lastName: 'Mehta', studentCode: 'S1' } }],
+    });
+
+    it('records who marked a new session', async () => {
+      database.class.findFirst.mockResolvedValue(mockClass);
+      attendance.create.mockResolvedValue({ id: 'att-a' });
+      attendance.findFirstOrThrow.mockResolvedValue({ ...mockAttendance, records: [{}] });
+      const result = await service.createAttendance({ classId: 'class-a', heldOn: '2026-09-01', records: [{ studentId: 'stu-a', status: AttendanceStatus.PRESENT }] }, faculty);
+      expect(tx.auditLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({ collegeId: 'col-a', actorId: 'faculty-user', action: 'ATTENDANCE_MARKED', entityType: 'Attendance', entityId: 'att-a' }) });
+      expect(attendance.create).toHaveBeenCalledWith({ data: { collegeId: 'col-a', classId: 'class-a', heldOn: new Date('2026-09-01') } });
+      expect(tx.attendanceRecord.createMany).toHaveBeenCalledWith({ data: [{ collegeId: 'col-a', attendanceId: 'att-a', studentId: 'stu-a', status: AttendanceStatus.PRESENT, note: undefined }] });
+      expect(result.correctionWindowEndsAt).toBe(new Date(mockAttendance.createdAt.getTime() + 48 * 3_600_000).toISOString());
+    });
+
+    it('lets faculty correct within 48 hours and records only what changed', async () => {
+      attendance.findFirst.mockResolvedValue(marked(hoursAgo(47)));
+      await service.updateAttendance('att-a', { records: [{ studentId: 'stu-a', status: AttendanceStatus.ABSENT, note: 'Left early' }] }, faculty);
+      expect(tx.auditLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+        action: 'ATTENDANCE_CORRECTED',
+        actorId: 'faculty-user',
+        metadata: { changes: [{ studentId: 'stu-a', from: { status: 'PRESENT', note: null }, to: { status: 'ABSENT', note: 'Left early' } }] },
+      }) });
+    });
+
+    it('does not log a correction when nothing changed', async () => {
+      attendance.findFirst.mockResolvedValue(marked(hoursAgo(1)));
+      await service.updateAttendance('att-a', { records: [{ studentId: 'stu-a', status: AttendanceStatus.PRESENT }] }, faculty);
+      expect(tx.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('blocks faculty after the window but not HOD or admin', async () => {
+      attendance.findFirst.mockResolvedValue(marked(hoursAgo(49)));
+      await expect(service.updateAttendance('att-a', { records: [{ studentId: 'stu-a', status: AttendanceStatus.ABSENT }] }, faculty)).rejects.toMatchObject({ response: { code: 'CORRECTION_WINDOW_CLOSED' } });
+      expect(tx.attendanceRecord.deleteMany).not.toHaveBeenCalled();
+      await expect(service.updateAttendance('att-a', { records: [{ studentId: 'stu-a', status: AttendanceStatus.ABSENT }] }, hod)).resolves.toBeDefined();
+      await expect(service.updateAttendance('att-a', { records: [{ studentId: 'stu-a', status: AttendanceStatus.ABSENT }] }, admin)).resolves.toBeDefined();
+    });
+
+    it('returns the history of a session the caller can open, with student names', async () => {
+      attendance.findFirst.mockResolvedValue(marked(hoursAgo(2)));
+      database.auditLog.findMany.mockResolvedValue([
+        { id: 'log-1', action: 'ATTENDANCE_MARKED', createdAt: hoursAgo(2), actor: { id: 'faculty-user', displayName: 'Dr. Priya Sharma' }, metadata: { records: 1 } },
+        { id: 'log-2', action: 'ATTENDANCE_CORRECTED', createdAt: hoursAgo(1), actor: { id: 'faculty-user', displayName: 'Dr. Priya Sharma' }, metadata: { changes: [{ studentId: 'stu-a', from: { status: 'PRESENT', note: null }, to: { status: 'LATE', note: null } }] } },
+      ]);
+      const history = await service.getAttendanceHistory('att-a', faculty);
+      expect(database.auditLog.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { collegeId: 'col-a', entityType: 'Attendance', entityId: 'att-a' } }));
+      expect(history[1]!.changes[0]).toMatchObject({ student: { firstName: 'Aarav' }, to: { status: 'LATE' } });
+      attendance.findFirst.mockResolvedValue(null);
+      await expect(service.getAttendanceHistory('att-x', faculty)).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });
