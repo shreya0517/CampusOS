@@ -67,6 +67,8 @@ export type RazorpayOrderResponse = {
   currency: string;
   keyId: string;
   invoiceNumber: string;
+  /** True only outside production without Razorpay keys, where the payment is simulated. */
+  testMode: boolean;
 };
 
 export async function listFeeStructures(): Promise<FeeStructure[]> {

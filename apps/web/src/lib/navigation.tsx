@@ -82,7 +82,6 @@ export const ROLE_NAVIGATION: Record<CanonicalRole, NavItem[]> = {
     { label: 'Timetable', href: '/dashboard/timetable', icon: 'timetable' },
     { label: 'Assignments', href: '/dashboard/assignments', icon: 'assignments' },
     { label: 'Exams', href: '/dashboard/exams', icon: 'exams' },
-    { label: 'Fees', href: '/dashboard/fees', icon: 'fees' },
     { label: 'Files', href: '/dashboard/files', icon: 'files' },
     { label: 'Profile', href: '/dashboard/faculty/me', icon: 'profile' },
     { label: 'Visitors', href: '/dashboard/visitors', icon: 'visitors' },
@@ -175,6 +174,8 @@ export function isRouteAllowedForRole(pathname: string, role: CanonicalRole): bo
   // Specific restrictions for HOD
   if (role === 'HOD') {
     if (clean === '/dashboard/student' || clean.startsWith('/dashboard/student/')) return false;
+    // Fee records stay with Admin; the HOD has no unrestricted financial access.
+    if (clean.startsWith('/dashboard/fees')) return false;
     if (clean === '/dashboard/institutional-overview') return false;
     if (clean === '/dashboard/faculty-performance') return false;
     if (clean === '/foundation') return false;

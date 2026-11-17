@@ -90,7 +90,11 @@ export default function FeesPage() {
     try {
       const order = await createRazorpayOrder(inv.id);
 
-      // Simulate or verify payment via test signature / Razorpay checkout
+      // Razorpay Checkout isn't integrated yet, so a payment can only be simulated, and only when the API is in test
+      // mode. Anywhere else, don't pretend the payment went through.
+      if (!order.testMode) {
+        throw new Error('Online checkout is not available yet. Please pay at the accounts office.');
+      }
       const razorpayPaymentId = `pay_rzp_${Date.now()}`;
       const razorpaySignature = `test_sig_${razorpayPaymentId}`;
 
@@ -102,7 +106,7 @@ export default function FeesPage() {
       });
 
       setPaymentSuccess(
-        `Payment of ₹${Number(inv.amountDue).toLocaleString('en-IN')} verified successfully! Receipt Number: ${
+        `Test payment of ₹${Number(inv.amountDue).toLocaleString('en-IN')} recorded (test mode, no money was charged). Receipt Number: ${
           res.receipt?.receiptNumber || 'Generated'
         }`,
       );
