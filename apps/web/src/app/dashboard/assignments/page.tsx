@@ -19,8 +19,181 @@ function formatDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+type StudentStatus = 'PENDING' | 'OVERDUE' | 'SUBMITTED' | 'RETURNED' | 'EVALUATED';
+type TabKey = 'ALL' | 'PENDING' | 'SUBMITTED' | 'EVALUATED' | 'OVERDUE';
+
+const STUDENT_STATUS: Record<StudentStatus, { label: string; badge: string }> = {
+  PENDING: { label: 'Pending', badge: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200' },
+  OVERDUE: { label: 'Overdue', badge: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200' },
+  SUBMITTED: { label: 'Submitted', badge: 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200' },
+  RETURNED: { label: 'Returned for changes', badge: 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-200' },
+  EVALUATED: { label: 'Evaluated', badge: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200' },
+};
+
+const TABS: Array<{ key: TabKey; label: string }> = [
+  { key: 'ALL', label: 'All' },
+  { key: 'PENDING', label: 'Pending' },
+  { key: 'SUBMITTED', label: 'Submitted' },
+  { key: 'EVALUATED', label: 'Evaluated' },
+  { key: 'OVERDUE', label: 'Overdue' },
+];
+
+/** Where an assignment stands for the signed-in student, from their own submission and the deadline. */
+function studentStatus(assignment: Assignment): StudentStatus {
+  const submission = assignment.mySubmission;
+  if (submission?.status === 'GRADED') return 'EVALUATED';
+  if (submission?.status === 'RETURNED') return 'RETURNED';
+  if (submission && submission.status !== 'DRAFT') return 'SUBMITTED';
+  return assignment.dueAt && new Date(assignment.dueAt) < new Date() ? 'OVERDUE' : 'PENDING';
+}
+
+const matchesTab = (status: StudentStatus, tab: TabKey): boolean => {
+  if (tab === 'ALL') return true;
+  if (tab === 'SUBMITTED') return status === 'SUBMITTED' || status === 'RETURNED';
+  return status === tab;
+};
+
+function StudentAssignments() {
+  const [assignments, setAssignments] = useState<Assignment[] | null>(null);
+  const [tab, setTab] = useState<TabKey>('ALL');
+  const [search, setSearch] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async (term = search): Promise<void> => {
+    setError(null);
+    try {
+      // Students have a handful of assignments a term, so one page of 100 lets the tabs count everything.
+      const params = new URLSearchParams({ page: '1', pageSize: '100' });
+      if (term.trim()) params.set('search', term.trim());
+      setAssignments((await listAssignments(params)).items);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Your assignments could not be loaded.');
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const withStatus = (assignments ?? []).map((assignment) => ({ assignment, status: studentStatus(assignment) }));
+  const visible = withStatus.filter(({ status }) => matchesTab(status, tab));
+  const tabLabel = TABS.find((item) => item.key === tab)?.label.toLowerCase() ?? '';
+
+  return (
+    <div className="grid gap-6">
+      <div>
+        <h1 className="text-3xl font-semibold">My Assignments</h1>
+        <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">Coursework from your subjects and where each one stands.</p>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div role="tablist" aria-label="Filter assignments by status" className="flex flex-wrap gap-2">
+          {TABS.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={tab === key}
+              onClick={() => setTab(key)}
+              className={
+                'rounded-full px-3 py-1.5 text-sm font-medium transition-colors ' +
+                (tab === key
+                  ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]'
+                  : 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]')
+              }
+            >
+              {label}
+              {assignments && <span className="ml-1.5 opacity-75">{withStatus.filter(({ status }) => matchesTab(status, key)).length}</span>}
+            </button>
+          ))}
+        </div>
+        <form
+          className="flex gap-2"
+          role="search"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void load(search);
+          }}
+        >
+          <input
+            aria-label="Search assignments"
+            placeholder="Search assignments..."
+            value={search}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)}
+            className="w-56 min-h-10 rounded-[var(--radius)] border bg-[hsl(var(--background))] px-3 text-sm"
+          />
+          <Button type="submit" variant="outline">Search</Button>
+        </form>
+      </div>
+
+      {error ? (
+        <ErrorState message={error} onRetry={() => void load()} />
+      ) : !assignments ? (
+        <Skeleton className="h-48 w-full" />
+      ) : visible.length === 0 ? (
+        <EmptyState
+          title={tab === 'ALL' ? 'No assignments yet' : 'No ' + tabLabel + ' assignments'}
+          description={tab === 'ALL' ? 'Assignments from your subjects will appear here.' : 'Nothing in this list right now.'}
+        />
+      ) : (
+        <Card>
+          <CardContent className="p-0">
+            <Table>
+              <thead>
+                <tr>
+                  <TableHead>Assignment</TableHead>
+                  <TableHead>Subject</TableHead>
+                  <TableHead>Due</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map(({ assignment, status }) => {
+                  const marks = assignment.mySubmission?.marksAwarded;
+                  const needsWork = status === 'PENDING' || status === 'OVERDUE' || status === 'RETURNED';
+                  return (
+                    <tr key={assignment.id}>
+                      <TableCell>
+                        <p className="font-semibold">{assignment.title}</p>
+                        <p className="text-xs text-[hsl(var(--muted-foreground))]">Max {assignment.maxMarks} marks</p>
+                      </TableCell>
+                      <TableCell>{assignment.class.subject.name}</TableCell>
+                      <TableCell className={'whitespace-nowrap ' + (status === 'OVERDUE' ? 'font-semibold text-red-600 dark:text-red-400' : '')}>
+                        {formatDate(assignment.dueAt)}
+                      </TableCell>
+                      <TableCell>
+                        <span className={'inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ' + STUDENT_STATUS[status].badge}>{STUDENT_STATUS[status].label}</span>
+                        {status === 'EVALUATED' && marks !== null && marks !== undefined && (
+                          <span className="ml-2 text-xs font-semibold">
+                            {marks}/{assignment.maxMarks}
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Link className="font-semibold text-[hsl(var(--primary))] underline underline-offset-4" href={'/dashboard/assignments/' + assignment.id}>
+                          {needsWork ? 'Open & submit' : 'View'}
+                        </Link>
+                      </TableCell>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 export default function AssignmentsPage() {
   const { primaryRole } = useAuth();
+  if (primaryRole === 'Student') return <StudentAssignments />;
+  return <StaffAssignments primaryRole={primaryRole} />;
+}
+
+function StaffAssignments({ primaryRole }: { primaryRole: string }) {
   const isStaff = primaryRole === 'Admin' || primaryRole === 'HOD' || primaryRole === 'Faculty';
 
   const [assignments, setAssignments] = useState<Assignment[]>([]);

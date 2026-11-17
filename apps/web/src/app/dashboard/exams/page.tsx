@@ -62,7 +62,9 @@ export default function ExamsPage() {
           <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Academics</p>
           <h1 className="mt-1 text-3xl font-semibold">Exams & Results</h1>
           <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-            Schedule examinations, record student marks, evaluate percentages, and publish term results.
+            {isStudent
+              ? 'Your upcoming examinations and published results.'
+              : 'Schedule examinations, record student marks, evaluate percentages, and publish term results.'}
           </p>
         </div>
         {isAdminOrHOD && (
@@ -104,7 +106,7 @@ export default function ExamsPage() {
               />
             </div>
             <div className="flex flex-wrap items-center gap-1.5 self-end pb-0.5">
-              {['ALL', 'DRAFT', 'SCHEDULED', 'COMPLETED', 'CANCELLED'].map((s) => (
+              {(isStudent ? ['ALL', 'SCHEDULED', 'COMPLETED'] : ['ALL', 'DRAFT', 'SCHEDULED', 'COMPLETED', 'CANCELLED']).map((s) => (
                 <button
                   key={s}
                   type="button"
@@ -159,7 +161,7 @@ export default function ExamsPage() {
                       </div>
                       <Link href={`/dashboard/exams/${exam.id}`} className="block">
                         <Button variant="outline" className="w-full text-xs">
-                          Manage & View Exam &rarr;
+                          {isStudent ? 'View exam' : 'Manage & View Exam'} &rarr;
                         </Button>
                       </Link>
                     </CardContent>
