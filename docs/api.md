@@ -156,3 +156,14 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 ## Faculty Performance
 
 - GET /api/v1/faculty/performance?departmentId=: ADMIN (every department, or one via departmentId) and HOD (their own department only; another departmentId returns 403). Returns { windowDays, faculty[] }; each row has the faculty member, `classes` taught, `sessionsMarked` and `assignmentsCreated` in the last `windowDays` (30) days, `pendingEvaluations` (SUBMITTED or LATE submissions in their classes), and `tasks` counts by status plus `overdue` (past the deadline and not approved). All figures come from stored records.
+
+## Institution Overview
+
+- GET /api/v1/overview/institution: ADMIN only (HOD, FACULTY and STUDENT get 403). Everything comes from stored records in the admin's college:
+  - `totals`: students, faculty and departments.
+  - `attendance.today` and `attendance.window` (the last `windowDays`, 30): present, absent, late, excused, `percentage` (late counts as attended, excused is left out) and `belowThreshold` (under 75%).
+  - `tasks`: task assignments by status, plus `overdue` (past the deadline and not approved).
+  - `pendingVisitors` and `upcomingExams` (draft or scheduled, starting today or later).
+  - `fees`: `collected` (completed payments), `outstanding` (unpaid balance of issued, partially paid and overdue invoices), `openInvoices` and `overdueInvoices`.
+  - `departments[]`: each department with its `hod` (a faculty member in the department who has the HOD role, or null), `faculty`, `students` (with an active enrollment), 30-day `attendance` and `openTasks` (pending, in progress or rework, assigned to its faculty).
+  - `recentActivity[]`: up to 12 of the latest events (students and faculty added, attendance marked, tasks submitted, visitors registered, marks submitted, approved or returned, attendance corrected), at most 4 per kind, newest first, each with a link.
