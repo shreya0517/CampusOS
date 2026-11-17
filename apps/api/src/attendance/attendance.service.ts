@@ -176,9 +176,14 @@ export class AttendanceService {
     }
     await this.assertStudentsInSection(attendance.class.sectionId, input.records.map((r) => r.studentId), context);
     const before = new Map(attendance.records.map((r) => [r.studentId, { status: r.status, note: r.note ?? null }]));
-    const changes = input.records
-      .map((r) => ({ studentId: r.studentId, from: before.get(r.studentId) ?? null, to: { status: r.status, note: r.note ?? null } }))
-      .filter((change) => change.from?.status !== change.to.status || change.from?.note !== change.to.note);
+    const incoming = new Set(input.records.map((r) => r.studentId));
+    // A correction replaces the whole record set, so students left out are removed and must be logged too.
+    const changes = [
+      ...input.records
+        .map((r) => ({ studentId: r.studentId, from: before.get(r.studentId) ?? null, to: { status: r.status, note: r.note ?? null } as { status: AttendanceStatus; note: string | null } | null }))
+        .filter((change) => change.from?.status !== change.to?.status || change.from?.note !== change.to?.note),
+      ...[...before.entries()].filter(([studentId]) => !incoming.has(studentId)).map(([studentId, from]) => ({ studentId, from, to: null })),
+    ];
     await this.database.$transaction(async (tx) => {
       await tx.attendanceRecord.deleteMany({ where: { collegeId: context.collegeId, attendanceId: attendance.id } });
       await tx.attendanceRecord.createMany({
@@ -203,7 +208,7 @@ export class AttendanceService {
       orderBy: { createdAt: 'asc' },
     });
     return entries.map((entry) => {
-      const metadata = (entry.metadata ?? {}) as { changes?: Array<{ studentId: string; from: { status: string; note: string | null } | null; to: { status: string; note: string | null } }> };
+      const metadata = (entry.metadata ?? {}) as { changes?: Array<{ studentId: string; from: { status: string; note: string | null } | null; to: { status: string; note: string | null } | null }> };
       return {
         id: entry.id,
         action: entry.action,

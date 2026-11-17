@@ -16,7 +16,7 @@ export type AttendanceHistoryEntry = {
   action: 'ATTENDANCE_MARKED' | 'ATTENDANCE_CORRECTED';
   createdAt: string;
   actor: { id: string; displayName: string } | null;
-  changes: Array<{ studentId: string; from: RecordState | null; to: RecordState; student: AttendanceStudentRef | null }>;
+  changes: Array<{ studentId: string; from: RecordState | null; to: RecordState | null; student: AttendanceStudentRef | null }>;
 };
 
 type List<T> = { items: T[]; total: number; page: number; pageSize: number };

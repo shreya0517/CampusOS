@@ -218,6 +218,15 @@ describe('AttendanceService', () => {
       }) });
     });
 
+    it('logs students left out of a correction as removed', async () => {
+      attendance.findFirst.mockResolvedValue({ ...marked(hoursAgo(1)), records: [...marked(hoursAgo(1)).records, { studentId: 'stu-b', status: AttendanceStatus.ABSENT, note: null, student: { id: 'stu-b', firstName: 'Nisha', lastName: 'Rao', studentCode: 'S2' } }] });
+      await service.updateAttendance('att-a', { records: [{ studentId: 'stu-a', status: AttendanceStatus.PRESENT }] }, faculty);
+      expect(tx.auditLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+        action: 'ATTENDANCE_CORRECTED',
+        metadata: { changes: [{ studentId: 'stu-b', from: { status: 'ABSENT', note: null }, to: null }] },
+      }) });
+    });
+
     it('does not log a correction when nothing changed', async () => {
       attendance.findFirst.mockResolvedValue(marked(hoursAgo(1)));
       await service.updateAttendance('att-a', { records: [{ studentId: 'stu-a', status: AttendanceStatus.PRESENT }] }, faculty);

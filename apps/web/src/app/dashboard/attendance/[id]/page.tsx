@@ -224,8 +224,12 @@ export default function AttendanceDetailPage() {
                         <li key={change.studentId}>
                           {change.student ? `${change.student.firstName} ${change.student.lastName}` : 'Student'}:{' '}
                           <span className={STATUS_COLORS[change.from?.status ?? 'EXCUSED']}>{change.from?.status ?? 'not recorded'}</span> →{' '}
-                          <span className={`font-semibold ${STATUS_COLORS[change.to.status]}`}>{change.to.status}</span>
-                          {change.to.note && change.to.note !== change.from?.note ? <span className="text-[hsl(var(--muted-foreground))]"> · “{change.to.note}”</span> : null}
+                          {change.to ? (
+                            <span className={`font-semibold ${STATUS_COLORS[change.to.status]}`}>{change.to.status}</span>
+                          ) : (
+                            <span className="font-semibold">removed from this session</span>
+                          )}
+                          {change.to?.note && change.to.note !== change.from?.note ? <span className="text-[hsl(var(--muted-foreground))]"> · “{change.to.note}”</span> : null}
                         </li>
                       ))}
                     </ul>
