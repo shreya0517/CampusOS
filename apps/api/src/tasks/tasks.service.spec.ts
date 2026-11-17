@@ -319,3 +319,14 @@ describe('TasksService listTasks assignment visibility', () => {
     expect(assignmentsWhere()).toEqual({ collegeId: 'college-1', assigneeUserId: 'faculty-1' });
   });
 });
+
+describe('TasksService my assignment stats', () => {
+  it('returns camelCase counts and a total, as the dashboards read them', async () => {
+    const byStatus: Record<string, number> = { PENDING: 2, IN_PROGRESS: 1, SUBMITTED: 3, APPROVED: 4, REWORK: 1 };
+    const database = { taskAssignment: { count: jest.fn(({ where }: { where: { status: string } }) => Promise.resolve(byStatus[where.status] ?? 0)) } };
+    const service = new TasksService(database as unknown as DatabaseService, {} as EventsService);
+    const stats = await service.getMyAssignmentStats({ userId: 'faculty-1', collegeId: 'college-1', roles: ['FACULTY'], permissions: [], departmentId: 'dept-1' });
+    expect(stats).toEqual({ pending: 2, inProgress: 1, submitted: 3, approved: 4, rework: 1, total: 11 });
+    expect(database.taskAssignment.count).toHaveBeenCalledWith({ where: { collegeId: 'college-1', assigneeUserId: 'faculty-1', status: 'PENDING' } });
+  });
+});
