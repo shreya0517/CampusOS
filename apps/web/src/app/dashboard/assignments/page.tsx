@@ -62,10 +62,16 @@ function StudentAssignments() {
   const load = async (term = search): Promise<void> => {
     setError(null);
     try {
-      // Students have a handful of assignments a term, so one page of 100 lets the tabs count everything.
-      const params = new URLSearchParams({ page: '1', pageSize: '100' });
-      if (term.trim()) params.set('search', term.trim());
-      setAssignments((await listAssignments(params)).items);
+      // The tabs count across everything, so load every page (usually just one) instead of paginating.
+      const all: Assignment[] = [];
+      for (let page = 1; ; page += 1) {
+        const params = new URLSearchParams({ page: String(page), pageSize: '100' });
+        if (term.trim()) params.set('search', term.trim());
+        const result = await listAssignments(params);
+        all.push(...result.items);
+        if (result.items.length === 0 || all.length >= result.total) break;
+      }
+      setAssignments(all);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Your assignments could not be loaded.');
     }
