@@ -276,7 +276,7 @@ describe('AttendanceService My Classes', () => {
     database.enrollment.groupBy.mockResolvedValue([{ sectionId: 'sec-a', _count: { _all: 30 } }]);
     database.attendanceRecord.groupBy.mockResolvedValue([{ status: AttendanceStatus.PRESENT, _count: { _all: 3 } }, { status: AttendanceStatus.ABSENT, _count: { _all: 1 } }]);
     const [first] = await service.listMyClasses(facultyUser);
-    expect(database.class.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { collegeId: 'col-a', faculty: { userId: 'faculty-user' } } }));
+    expect(database.class.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { collegeId: 'col-a', section: { semester: { course: { departmentId: 'dept-a' } } }, faculty: { userId: 'faculty-user' } } }));
     expect(first).toMatchObject({ id: 'class-a', studentCount: 30, sessionsHeld: 4, assignmentCount: 2, pendingEvaluations: 3, attendance: { attended: 3, counted: 4, percentage: 75 } });
     expect(database.submission.count).toHaveBeenCalledWith({ where: { collegeId: 'col-a', assignment: { classId: 'class-a' }, status: { in: ['SUBMITTED', 'LATE'] } } });
     expect(first).not.toHaveProperty('_count');
@@ -304,6 +304,27 @@ describe('AttendanceService My Classes', () => {
       { student: expect.objectContaining({ id: 's2' }), attendance: expect.objectContaining({ percentage: 100, belowThreshold: false }), submittedAssignments: 1 },
     ]);
     expect(overview).toMatchObject({ sessionsHeld: 5, attendance: { attended: 8, counted: 10 }, assignments: [{ id: 'as-1', submissions: 1 }] });
+  });
+
+  it('keeps an HOD who also teaches inside their department', async () => {
+    const hodTeacher: AuthorizationContext = { userId: 'hod-user', collegeId: 'col-a', roles: ['HOD', 'FACULTY'], permissions: [], departmentId: 'dept-a' };
+    database.class.findMany.mockResolvedValue([]);
+    database.enrollment.groupBy.mockResolvedValue([]);
+    await service.listMyClasses(hodTeacher);
+    expect(database.class.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { collegeId: 'col-a', section: { semester: { course: { departmentId: 'dept-a' } } }, faculty: { userId: 'hod-user' } } }));
+  });
+
+  it('counts assignment submissions only from the active roster', async () => {
+    database.class.findFirst.mockResolvedValue(taught);
+    database.enrollment.findMany.mockResolvedValue([]);
+    database.attendanceRecord.groupBy.mockResolvedValue([]);
+    database.attendance.count.mockResolvedValue(0);
+    database.assignment.findMany.mockResolvedValue([]);
+    database.submission.groupBy.mockResolvedValue([]);
+    await service.getClassOverview('class-a', facultyUser);
+    expect(database.assignment.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({ _count: { select: { submissions: { where: { status: { not: 'DRAFT' }, student: { enrollments: { some: { sectionId: 'sec-a', status: 'ACTIVE' } } } } } } } }),
+    }));
   });
 
   it('returns 404 for a class outside the caller scope and blocks students', async () => {

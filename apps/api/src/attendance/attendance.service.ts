@@ -70,8 +70,9 @@ export class AttendanceService {
   /** The classes the signed-in staff member teaches, with enrolment, sessions held, attendance and coursework counts. */
   async listMyClasses(context: AuthorizationContext) {
     if (context.roles.includes('STUDENT')) denied();
+    // Same scope as every other class read (an HOD stays in their department), narrowed to classes the caller teaches.
     const classes = await this.database.class.findMany({
-      where: { collegeId: context.collegeId, faculty: { userId: context.userId } },
+      where: { ...this.classWhere(context), faculty: { userId: context.userId } },
       include: { ...classInclude, _count: { select: { attendances: true, assignments: true } } },
       orderBy: [{ subject: { name: 'asc' } }, { section: { code: 'asc' } }],
     });
@@ -111,7 +112,8 @@ export class AttendanceService {
       this.database.attendance.count({ where: { collegeId: context.collegeId, classId } }),
       this.database.assignment.findMany({
         where: { collegeId: context.collegeId, classId },
-        select: { id: true, title: true, dueAt: true, maxMarks: true, _count: { select: { submissions: { where: { status: { not: 'DRAFT' } } } } } },
+        // Count only students still on the active roster, so submissions never exceed the students shown.
+        select: { id: true, title: true, dueAt: true, maxMarks: true, _count: { select: { submissions: { where: { status: { not: 'DRAFT' }, student: { enrollments: { some: { sectionId: cls.sectionId, status: 'ACTIVE' } } } } } } } },
         orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
       }),
       this.database.submission.groupBy({ by: ['studentId'], where: { collegeId: context.collegeId, assignment: { classId }, status: { not: 'DRAFT' } }, _count: { _all: true } }),
