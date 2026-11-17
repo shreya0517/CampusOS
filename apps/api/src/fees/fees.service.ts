@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { createHmac } from 'crypto';
 import { InvoiceStatus, PaymentMethod, PaymentStatus } from '@prisma/client';
 import { DatabaseService } from '../database.service';
@@ -21,12 +21,22 @@ const invoiceMissing = (): never => {
   throw new NotFoundException({ code: 'INVOICE_NOT_FOUND', message: 'Invoice was not found in this college.' });
 };
 
+/** Without a Razorpay secret, outside production, payments run in a test mode that accepts simulated signatures. */
+const paymentsInTestMode = (): boolean => process.env.NODE_ENV !== 'production' && !process.env.RAZORPAY_KEY_SECRET;
+
+/** In production, online payments need real Razorpay keys; otherwise refuse instead of accepting unverifiable payments. */
+const assertPaymentsAvailable = (): void => {
+  if (process.env.NODE_ENV === 'production' && (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET)) {
+    throw new ServiceUnavailableException({ code: 'PAYMENTS_NOT_CONFIGURED', message: 'Online payments are not set up yet. Please pay at the accounts office.' });
+  }
+};
+
 @Injectable()
 export class FeesService {
   constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
 
   async createFeeStructure(input: CreateFeeStructureDto, context: AuthorizationContext) {
-    if (context.roles.includes('STUDENT')) denied();
+    if (!context.roles.includes('ADMIN')) denied();
 
     try {
       return await this.database.feeStructure.create({
@@ -90,7 +100,7 @@ export class FeesService {
   }
 
   async createInvoice(input: CreateInvoiceDto, context: AuthorizationContext) {
-    if (context.roles.includes('STUDENT')) denied();
+    if (!context.roles.includes('ADMIN')) denied();
 
     const student = await this.database.student.findFirst({
       where: { id: input.studentId, collegeId: context.collegeId },
@@ -190,9 +200,27 @@ export class FeesService {
     });
   }
 
+  /**
+   * Whether the web app can take an online payment right now. There is no Razorpay Checkout step in the web app yet,
+   * so the only payment it can complete is the simulated one in test mode; it checks this before creating an order.
+   */
+  getPaymentMode(): { testMode: boolean; onlinePaymentsAvailable: boolean } {
+    const testMode = paymentsInTestMode();
+    return { testMode, onlinePaymentsAvailable: testMode };
+  }
+
+  /** The signed-in student's own profile id; payments are only ever made against their own invoices. */
+  private async ownStudentId(context: AuthorizationContext): Promise<string> {
+    if (!context.roles.includes('STUDENT')) denied();
+    const student = await this.database.student.findFirst({ where: { collegeId: context.collegeId, userId: context.userId }, select: { id: true } });
+    if (!student) throw new NotFoundException({ code: 'STUDENT_NOT_FOUND', message: 'Student profile was not found.' });
+    return student.id;
+  }
+
   async createRazorpayOrder(input: CreateRazorpayOrderDto, context: AuthorizationContext) {
+    assertPaymentsAvailable();
     const invoice = await this.database.invoice.findFirst({
-      where: { id: input.invoiceId, collegeId: context.collegeId },
+      where: { id: input.invoiceId, collegeId: context.collegeId, studentId: await this.ownStudentId(context) },
       include: { student: STUDENT_SUMMARY },
     });
 
@@ -224,12 +252,15 @@ export class FeesService {
       currency: 'INR',
       keyId,
       invoiceNumber: invoice.invoiceNumber,
+      // Tells the web app it may complete a simulated payment; never true in production.
+      testMode: paymentsInTestMode(),
     };
   }
 
   async verifyRazorpayPayment(input: VerifyRazorpayPaymentDto, context: AuthorizationContext) {
+    assertPaymentsAvailable();
     const payment = await this.database.payment.findFirst({
-      where: { id: input.paymentId, collegeId: context.collegeId },
+      where: { id: input.paymentId, collegeId: context.collegeId, invoice: { studentId: await this.ownStudentId(context) } },
       include: { invoice: true },
     });
 
@@ -237,15 +268,16 @@ export class FeesService {
       throw new NotFoundException({ code: 'PAYMENT_NOT_FOUND', message: 'Payment record was not found.' });
     }
 
-    const secret = process.env.RAZORPAY_KEY_SECRET || 'test_secret';
-
-    const expectedSignature = createHmac('sha256', secret)
-      .update(`${input.razorpayOrderId}|${input.razorpayPaymentId}`)
-      .digest('hex');
+    // A real Razorpay signature is checked against the configured secret. The simulated test signature is only
+    // accepted in test mode (outside production, with no secret configured); before, it was accepted everywhere.
+    const secret = process.env.RAZORPAY_KEY_SECRET;
+    const expectedSignature = secret
+      ? createHmac('sha256', secret).update(`${input.razorpayOrderId}|${input.razorpayPaymentId}`).digest('hex')
+      : null;
 
     const isValidSignature =
-      input.razorpaySignature === expectedSignature ||
-      input.razorpaySignature === `test_sig_${input.razorpayPaymentId}`;
+      (expectedSignature !== null && input.razorpaySignature === expectedSignature) ||
+      (paymentsInTestMode() && input.razorpaySignature === `test_sig_${input.razorpayPaymentId}`);
 
     if (!isValidSignature) {
       await this.database.payment.update({

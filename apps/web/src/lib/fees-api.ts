@@ -67,6 +67,8 @@ export type RazorpayOrderResponse = {
   currency: string;
   keyId: string;
   invoiceNumber: string;
+  /** True only outside production without Razorpay keys, where the payment is simulated. */
+  testMode: boolean;
 };
 
 export async function listFeeStructures(): Promise<FeeStructure[]> {
@@ -107,6 +109,8 @@ export async function createInvoice(input: {
     body: JSON.stringify(input),
   });
 }
+
+export const getPaymentMode = (): Promise<{ testMode: boolean; onlinePaymentsAvailable: boolean }> => authenticatedRequest('/fees/payment-mode');
 
 export async function createRazorpayOrder(invoiceId: string): Promise<RazorpayOrderResponse> {
   return authenticatedRequest<RazorpayOrderResponse>(`/fees/invoices/${invoiceId}/create-razorpay-order`, {

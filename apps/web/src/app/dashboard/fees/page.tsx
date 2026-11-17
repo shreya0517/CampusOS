@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import {
   createRazorpayOrder,
   getMyInvoices,
+  getPaymentMode,
   getReceipts,
   listFeeStructures,
   listInvoices,
@@ -48,6 +49,12 @@ export default function FeesPage() {
   const [payingInvoice, setPayingInvoice] = useState<Invoice | null>(null);
   const [processingPayment, setProcessingPayment] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState<string | null>(null);
+  // Asked before any order is created, so a click never leaves a pending payment behind when checkout isn't available.
+  const [onlinePayments, setOnlinePayments] = useState<{ testMode: boolean; onlinePaymentsAvailable: boolean } | null>(null);
+
+  useEffect(() => {
+    if (isStudent) getPaymentMode().then(setOnlinePayments).catch(() => setOnlinePayments({ testMode: false, onlinePaymentsAvailable: false }));
+  }, [isStudent]);
 
   const loadData = async () => {
     setLoading(true);
@@ -90,7 +97,11 @@ export default function FeesPage() {
     try {
       const order = await createRazorpayOrder(inv.id);
 
-      // Simulate or verify payment via test signature / Razorpay checkout
+      // Razorpay Checkout isn't integrated yet, so a payment can only be simulated, and only when the API is in test
+      // mode. Anywhere else, don't pretend the payment went through.
+      if (!order.testMode) {
+        throw new Error('Online checkout is not available yet. Please pay at the accounts office.');
+      }
       const razorpayPaymentId = `pay_rzp_${Date.now()}`;
       const razorpaySignature = `test_sig_${razorpayPaymentId}`;
 
@@ -102,7 +113,7 @@ export default function FeesPage() {
       });
 
       setPaymentSuccess(
-        `Payment of ₹${Number(inv.amountDue).toLocaleString('en-IN')} verified successfully! Receipt Number: ${
+        `Test payment of ₹${Number(inv.amountDue).toLocaleString('en-IN')} recorded (test mode, no money was charged). Receipt Number: ${
           res.receipt?.receiptNumber || 'Generated'
         }`,
       );
@@ -290,15 +301,21 @@ export default function FeesPage() {
                         )}
                       </div>
 
-                      {inv.status !== 'PAID' ? (
+                      {inv.status !== 'PAID' && onlinePayments && !onlinePayments.onlinePaymentsAvailable ? (
+                        <p className="rounded bg-[hsl(var(--muted))] p-2 text-center text-xs text-[hsl(var(--muted-foreground))]">
+                          Online payment isn&apos;t available yet. Please pay at the accounts office.
+                        </p>
+                      ) : inv.status !== 'PAID' ? (
                         <Button
-                          disabled={processingPayment && payingInvoice?.id === inv.id}
+                          disabled={!onlinePayments || (processingPayment && payingInvoice?.id === inv.id)}
                           onClick={() => void handleInitiatePayment(inv)}
                           className="w-full text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
                         >
                           {processingPayment && payingInvoice?.id === inv.id
                             ? 'Verifying Razorpay...'
-                            : 'Pay Now via Razorpay'}
+                            : onlinePayments?.testMode
+                              ? 'Pay Now (test mode)'
+                              : 'Pay Now via Razorpay'}
                         </Button>
                       ) : (
                         <div className="rounded bg-green-50 p-2 text-center text-xs font-semibold text-green-800 dark:bg-green-950/40 dark:text-green-300">
