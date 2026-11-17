@@ -223,3 +223,50 @@ describe('TimetableService', () => {
     });
   });
 });
+
+describe('TimetableService student scoping', () => {
+  const database = {
+    class: { findMany: jest.fn().mockResolvedValue([]) },
+    timetable: { findMany: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
+    student: { findFirst: jest.fn() },
+    enrollment: { findMany: jest.fn() },
+  };
+  const service = new TimetableService(database as unknown as DatabaseService);
+  const listWhere = (): Record<string, unknown> => (database.timetable.findMany.mock.calls.at(-1)?.[0] as { where: Record<string, unknown> }).where;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    database.student.findFirst.mockResolvedValue({ id: 'stu-1' });
+    database.enrollment.findMany.mockResolvedValue([{ sectionId: 'sec-a' }]);
+  });
+
+  it('limits the timetable list to the sections a student is enrolled in', async () => {
+    await service.listEntries(parseTimetableListQuery({}), studentContext);
+    expect(listWhere()).toEqual({ collegeId: 'col-a', class: { sectionId: { in: ['sec-a'] } } });
+    expect(database.enrollment.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { collegeId: 'col-a', studentId: 'stu-1', status: 'ACTIVE' } }));
+  });
+
+  it('returns nothing when a student asks for another section', async () => {
+    await service.listEntries(parseTimetableListQuery({ sectionId: 'sec-b' }), studentContext);
+    expect(listWhere()).toEqual({ collegeId: 'col-a', class: { sectionId: { in: [] } } });
+  });
+
+  it('returns nothing for a student user without a student profile', async () => {
+    database.student.findFirst.mockResolvedValue(null);
+    await service.listEntries(parseTimetableListQuery({}), studentContext);
+    expect(listWhere()).toEqual({ collegeId: 'col-a', class: { sectionId: { in: [] } } });
+  });
+
+  it('limits the class list to the student sections', async () => {
+    await service.getClasses(studentContext);
+    expect(database.class.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { collegeId: 'col-a', sectionId: { in: ['sec-a'] } } }));
+  });
+
+  it('leaves staff lists unscoped by section', async () => {
+    await service.listEntries(parseTimetableListQuery({}), admin);
+    expect(listWhere()).toEqual({ collegeId: 'col-a' });
+    await service.getClasses(facultyContext);
+    expect(database.class.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: { collegeId: 'col-a' } }));
+    expect(database.student.findFirst).not.toHaveBeenCalled();
+  });
+});

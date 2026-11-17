@@ -119,30 +119,33 @@ export default function TimetablePage() {
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 border-b pb-4">
-        <button
-          type="button"
-          onClick={() => setActiveTab('my')}
-          className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
-            activeTab === 'my'
-              ? 'bg-[hsl(var(--primary))] text-white shadow'
-              : 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))]'
-          }`}
-        >
-          My Timetable
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('all')}
-          className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
-            activeTab === 'all'
-              ? 'bg-[hsl(var(--primary))] text-white shadow'
-              : 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))]'
-          }`}
-        >
-          All Schedules
-        </button>
-      </div>
+      {/* Students only have their own timetable, so the tabs are staff-only. */}
+      {!isStudent && (
+        <div className="flex flex-wrap items-center gap-3 border-b pb-4">
+          <button
+            type="button"
+            onClick={() => setActiveTab('my')}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+              activeTab === 'my'
+                ? 'bg-[hsl(var(--primary))] text-white shadow'
+                : 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))]'
+            }`}
+          >
+            My Timetable
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('all')}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+              activeTab === 'all'
+                ? 'bg-[hsl(var(--primary))] text-white shadow'
+                : 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))]'
+            }`}
+          >
+            All Schedules
+          </button>
+        </div>
+      )}
 
       <Card>
         <CardHeader>

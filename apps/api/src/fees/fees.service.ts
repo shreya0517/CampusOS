@@ -53,9 +53,31 @@ export class FeesService {
     }
   }
 
+  /**
+   * Students only see fee structures that apply to them: college-wide ones, or ones for the course
+   * and semester they are actively enrolled in. Staff see every structure in the college.
+   */
+  private async studentFeeStructureScope(context: AuthorizationContext) {
+    const isStaff = context.roles.some((role) => role === 'SUPER_ADMIN' || role === 'ADMIN' || role === 'HOD' || role === 'FACULTY');
+    if (isStaff || !context.roles.includes('STUDENT')) return {};
+    const student = await this.database.student.findFirst({
+      where: { collegeId: context.collegeId, userId: context.userId },
+      select: { enrollments: { where: { status: 'ACTIVE' }, select: { section: { select: { semesterId: true, semester: { select: { courseId: true } } } } } } },
+    });
+    const placements = (student?.enrollments ?? []).map((enrollment) => ({ courseId: enrollment.section.semester.courseId, semesterId: enrollment.section.semesterId }));
+    return {
+      OR: [
+        { courseId: null, semesterId: null },
+        ...placements.map(({ courseId, semesterId }) => ({
+          AND: [{ OR: [{ courseId: null }, { courseId }] }, { OR: [{ semesterId: null }, { semesterId }] }],
+        })),
+      ],
+    };
+  }
+
   async listFeeStructures(context: AuthorizationContext) {
     return this.database.feeStructure.findMany({
-      where: { collegeId: context.collegeId },
+      where: { collegeId: context.collegeId, ...(await this.studentFeeStructureScope(context)) },
       orderBy: { createdAt: 'desc' },
       include: {
         course: true,
