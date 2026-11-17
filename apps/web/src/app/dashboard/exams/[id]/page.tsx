@@ -171,9 +171,11 @@ export default function ExamDetailPage() {
                 <option value="CANCELLED">Status: Cancelled</option>
               </select>
 
-              <Button variant="primary" loading={calcLoading} onClick={() => void handlePublishResults()}>
-                Calculate & Publish Results
-              </Button>
+              {isAdminOrHOD && (
+                <Button variant="primary" loading={calcLoading} onClick={() => void handlePublishResults()}>
+                  Calculate & Publish Results
+                </Button>
+              )}
 
               {isAdminOrHOD && (
                 <Button variant="destructive" onClick={() => void handleDeleteExam()}>
