@@ -97,3 +97,11 @@ All student endpoints require a bearer access token and derive tenant, role, and
 - POST /api/v1/students/:id/enrollments: ADMIN/HOD add or update a section enrollment. Body: { sectionId, status? }.
 
 HOD and FACULTY access is restricted to students whose enrolled section belongs to their authenticated faculty department. Association requests validate that the section belongs to the authenticated college and department; cross-college and cross-department IDs return 403 FORBIDDEN without resource details.
+
+## Student Attendance
+
+- GET /api/v1/attendance/me: STUDENT reads only their own attendance. The student is resolved from the access token; the endpoint takes no student id.
+  - Query: subjectId?, from?, to? (YYYY-MM-DD, from <= to), page (default 1), pageSize (default 20, max 100). The filters apply to `days` and `records` only; `overall` and `subjects` always cover every record.
+  - Response: { threshold, overall, subjects[], days[], records: { items[], total, page, pageSize } }. `overall`, each subject and each day carry { present, absent, late, excused, attended, counted, percentage, belowThreshold }.
+  - LATE counts as attended. EXCUSED is left out of the percentage. `percentage` is null when nothing has been counted yet. `threshold` is 75.
+  - Other roles get 403 FORBIDDEN. A STUDENT user without a linked student profile gets 404 STUDENT_NOT_FOUND. Invalid or impossible dates (for example 2026-02-31) return 400 INVALID_INPUT.

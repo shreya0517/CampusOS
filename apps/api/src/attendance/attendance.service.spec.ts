@@ -161,6 +161,9 @@ describe('AttendanceService', () => {
     it('rejects bad query values', () => {
       expect(() => parseMyAttendanceQuery({ from: '2026-13-45' })).toThrow();
       expect(() => parseMyAttendanceQuery({ from: '01/10/2026' })).toThrow();
+      expect(() => parseMyAttendanceQuery({ from: '2026-02-31' })).toThrow();
+      expect(() => parseMyAttendanceQuery({ to: '2026-04-31' })).toThrow();
+      expect(parseMyAttendanceQuery({ from: '2028-02-29' }).from).toBe('2028-02-29');
       expect(() => parseMyAttendanceQuery({ from: '2026-10-31', to: '2026-10-01' })).toThrow();
       expect(parseMyAttendanceQuery({ subjectId: 'subj-os', from: '2026-10-01', to: '2026-10-31' })).toEqual({ subjectId: 'subj-os', from: '2026-10-01', to: '2026-10-31', page: 1, pageSize: 20 });
     });

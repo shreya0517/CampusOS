@@ -47,7 +47,8 @@ export const parseAttendanceListQuery = (v: unknown): AttendanceListQuery => {
 
 const optionalDate = (v: unknown): string | undefined => {
   const s = optionalString(v);
-  if (s !== undefined && (!/^\d{4}-\d{2}-\d{2}$/.test(s) || Number.isNaN(Date.parse(s)))) invalid();
+  // Date.parse rolls impossible dates over (2026-02-31 becomes March 3), so check the date round-trips unchanged.
+  if (s !== undefined && (!/^\d{4}-\d{2}-\d{2}$/.test(s) || Number.isNaN(Date.parse(s)) || new Date(s).toISOString().slice(0, 10) !== s)) invalid();
   return s;
 };
 
