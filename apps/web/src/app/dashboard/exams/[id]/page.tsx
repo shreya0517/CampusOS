@@ -27,6 +27,12 @@ const STATUS_COLORS: Record<ExamStatus, string> = {
   CANCELLED: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200 border-red-300',
 };
 
+const MARKS_BADGE: Record<'DRAFT' | 'SUBMITTED' | 'APPROVED', string> = {
+  DRAFT: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200',
+  SUBMITTED: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200',
+  APPROVED: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200',
+};
+
 export default function ExamDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -138,6 +144,8 @@ export default function ExamDetailPage() {
   if (loading) return <Skeleton className="h-96 w-full" />;
   if (error || !exam) return <ErrorState message={error ?? 'Exam not found'} onRetry={() => void loadData()} />;
 
+  const allPapersApproved = Boolean(exam.examSubjects?.length) && (exam.examSubjects ?? []).every((paper) => paper.marksStatus === 'APPROVED');
+
   return (
     <div className="grid gap-6">
       <div>
@@ -171,8 +179,15 @@ export default function ExamDetailPage() {
                 <option value="CANCELLED">Status: Cancelled</option>
               </select>
 
-              {isAdminOrHOD && (
-                <Button variant="primary" loading={calcLoading} onClick={() => void handlePublishResults()}>
+              {/* Admin publishes results once every paper's marks are approved (HOD decision 4). */}
+              {primaryRole === 'Admin' && (
+                <Button
+                  variant="primary"
+                  loading={calcLoading}
+                  disabled={!allPapersApproved}
+                  title={allPapersApproved ? undefined : 'Every paper’s marks must be approved first'}
+                  onClick={() => void handlePublishResults()}
+                >
                   Calculate & Publish Results
                 </Button>
               )}
@@ -260,6 +275,7 @@ export default function ExamDetailPage() {
                   <TableHead>Semester / Section</TableHead>
                   <TableHead>Exam Date</TableHead>
                   <TableHead>Max / Pass Marks</TableHead>
+                  <TableHead>Marks</TableHead>
                   <TableHead>Actions</TableHead>
                 </tr>
               </thead>
@@ -276,6 +292,11 @@ export default function ExamDetailPage() {
                     <TableCell>{new Date(sub.examAt).toLocaleString()}</TableCell>
                     <TableCell>
                       {sub.maxMarks} Max / {sub.passMarks} Pass
+                    </TableCell>
+                    <TableCell>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${MARKS_BADGE[sub.marksStatus ?? 'DRAFT']}`}>
+                        {sub.marksStatus === 'SUBMITTED' ? 'Awaiting review' : sub.marksStatus === 'APPROVED' ? 'Approved' : 'Draft'}
+                      </span>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
