@@ -306,6 +306,33 @@ export class ExamsService {
     return { examSubject, items, history };
   }
 
+  /**
+   * Papers whose marks are waiting for review: every submitted paper for an Admin, only the HOD's department for an
+   * HOD (both the paper's semester and, for section papers, its section must be in the department). Oldest first.
+   */
+  async listMarksReviewQueue(context: AuthorizationContext) {
+    const isAdmin = context.roles.includes('ADMIN') || context.roles.includes('SUPER_ADMIN');
+    if (!isAdmin && !context.roles.includes('HOD')) denied();
+    if (!isAdmin && !context.departmentId) denied();
+    const inDepartment = { course: { departmentId: context.departmentId ?? '' } };
+    return this.database.examSubject.findMany({
+      where: {
+        collegeId: context.collegeId,
+        marksStatus: 'SUBMITTED',
+        ...(isAdmin ? {} : { semester: inDepartment, OR: [{ sectionId: null }, { section: { semester: inDepartment } }] }),
+      },
+      select: {
+        id: true,
+        marksSubmittedAt: true,
+        exam: { select: { id: true, name: true } },
+        subject: { select: { id: true, code: true, name: true } },
+        semester: { select: { id: true, name: true } },
+        section: { select: { id: true, code: true } },
+      },
+      orderBy: { marksSubmittedAt: 'asc' },
+    });
+  }
+
   /** Submissions, approvals and returns for one paper, oldest first. */
   private async marksHistory(examSubjectId: string, context: AuthorizationContext) {
     const entries = await this.database.auditLog.findMany({

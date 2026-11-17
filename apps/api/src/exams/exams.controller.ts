@@ -31,6 +31,12 @@ export class ExamsController {
     return this.service.listExams(parsed, context);
   }
 
+  @Get('review-queue')
+  @RequireRoles('ADMIN', 'HOD')
+  async listMarksReviewQueue(@CurrentAuthorization() context: AuthorizationContext) {
+    return this.service.listMarksReviewQueue(context);
+  }
+
   @Get('me/results')
   @RequireRoles('STUDENT')
   async getMyResults(@CurrentAuthorization() context: AuthorizationContext) {
