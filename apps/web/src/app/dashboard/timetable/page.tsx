@@ -37,7 +37,6 @@ function formatTime(dateOrStr: string): string {
 
 export default function TimetablePage() {
   const { primaryRole } = useAuth();
-  const isStaff = primaryRole === 'Admin' || primaryRole === 'HOD' || primaryRole === 'Faculty';
   // Only Admin builds and changes timetables; HOD and faculty view them.
   const canEdit = primaryRole === 'Admin';
   const isStudent = primaryRole === 'Student';
