@@ -295,3 +295,27 @@ describe('TasksService WebSocket Event Emissions', () => {
     });
   });
 });
+
+describe('TasksService listTasks assignment visibility', () => {
+  const database = { task: { findMany: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) } };
+  const service = new TasksService(database as unknown as DatabaseService, {} as EventsService);
+  const query = { page: 1, pageSize: 20 } as Parameters<TasksService['listTasks']>[0];
+  const assignmentsWhere = (): unknown => (database.task.findMany.mock.calls.at(-1)?.[0] as { include: { assignments: { where: unknown } } }).include.assignments.where;
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('returns every assignee status to admins', async () => {
+    await service.listTasks(query, { userId: 'admin-1', collegeId: 'college-1', roles: ['ADMIN'], permissions: [], departmentId: null });
+    expect(assignmentsWhere()).toEqual({ collegeId: 'college-1' });
+  });
+
+  it('returns every assignee status to HODs', async () => {
+    await service.listTasks(query, { userId: 'hod-1', collegeId: 'college-1', roles: ['HOD'], permissions: [], departmentId: 'dept-1' });
+    expect(assignmentsWhere()).toEqual({ collegeId: 'college-1' });
+  });
+
+  it('returns only their own assignment to faculty', async () => {
+    await service.listTasks(query, { userId: 'faculty-1', collegeId: 'college-1', roles: ['FACULTY'], permissions: [], departmentId: 'dept-1' });
+    expect(assignmentsWhere()).toEqual({ collegeId: 'college-1', assigneeUserId: 'faculty-1' });
+  });
+});

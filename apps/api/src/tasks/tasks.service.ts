@@ -123,6 +123,15 @@ export class TasksService {
         where,
         include: {
           ...taskInclude,
+          assignments: {
+            // Admin and HOD see every assignee's status; faculty only see their own assignment.
+            where: this.isAdmin(context) || this.isHod(context) ? { collegeId: context.collegeId } : { collegeId: context.collegeId, assigneeUserId: context.userId },
+            select: {
+              id: true,
+              status: true,
+              assigneeUserId: true,
+            },
+          },
           _count: { select: { assignments: true } },
         },
         orderBy: [{ deadline: 'asc' }, { createdAt: 'desc' }],

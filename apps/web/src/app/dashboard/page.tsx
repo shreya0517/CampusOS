@@ -272,7 +272,7 @@ function HodDashboard() {
     return 'Good evening';
   })();
 
-  const submittedTasks = tasks.filter((t) => t.assignments.some((a) => a.status === 'SUBMITTED'));
+  const submittedTasks = tasks.filter((t) => (t.assignments ?? []).some((a) => a.status === 'SUBMITTED'));
 
   return (
     <div className="grid gap-8">
