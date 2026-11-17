@@ -50,6 +50,7 @@ export const ROLE_NAVIGATION: Record<CanonicalRole, NavItem[]> = {
     { label: 'Files', href: '/dashboard/files', icon: 'files' },
     { label: 'Visitors', href: '/dashboard/visitors', icon: 'visitors' },
     { label: 'Foundation', href: '/foundation', icon: 'foundation' },
+    { label: 'Announcements', href: '/dashboard/announcements', icon: 'announcements' },
     { label: 'Settings', href: '/dashboard/settings', icon: 'settings' },
   ],
   ADMIN: [
@@ -68,6 +69,7 @@ export const ROLE_NAVIGATION: Record<CanonicalRole, NavItem[]> = {
     { label: 'Files', href: '/dashboard/files', icon: 'files' },
     { label: 'Visitors', href: '/dashboard/visitors', icon: 'visitors' },
     { label: 'Foundation', href: '/foundation', icon: 'foundation' },
+    { label: 'Announcements', href: '/dashboard/announcements', icon: 'announcements' },
     { label: 'Settings', href: '/dashboard/settings', icon: 'settings' },
   ],
   HOD: [
@@ -84,6 +86,7 @@ export const ROLE_NAVIGATION: Record<CanonicalRole, NavItem[]> = {
     { label: 'Files', href: '/dashboard/files', icon: 'files' },
     { label: 'Profile', href: '/dashboard/faculty/me', icon: 'profile' },
     { label: 'Visitors', href: '/dashboard/visitors', icon: 'visitors' },
+    { label: 'Announcements', href: '/dashboard/announcements', icon: 'announcements' },
     { label: 'Settings', href: '/dashboard/settings', icon: 'settings' },
   ],
   FACULTY: [
@@ -98,6 +101,7 @@ export const ROLE_NAVIGATION: Record<CanonicalRole, NavItem[]> = {
     { label: 'My Profile', href: '/dashboard/faculty/me', icon: 'profile' },
     { label: 'Files', href: '/dashboard/files', icon: 'files' },
     { label: 'Visitors', href: '/dashboard/visitors', icon: 'visitors' },
+    { label: 'Announcements', href: '/dashboard/announcements', icon: 'announcements' },
     { label: 'Settings', href: '/dashboard/settings', icon: 'settings' },
   ],
   STUDENT: [
@@ -111,6 +115,7 @@ export const ROLE_NAVIGATION: Record<CanonicalRole, NavItem[]> = {
     { label: 'Files', href: '/dashboard/files', icon: 'files' },
     { label: 'Visitors', href: '/dashboard/visitors', icon: 'visitors' },
     { label: 'My Profile', href: '/dashboard/student/profile', icon: 'profile' },
+    { label: 'Announcements', href: '/dashboard/announcements', icon: 'announcements' },
     { label: 'Settings', href: '/dashboard/settings', icon: 'settings' },
   ],
 };
@@ -135,6 +140,7 @@ export function isRouteAllowedForRole(pathname: string, role: CanonicalRole): bo
     if (clean === '/dashboard/student/attendance') return true;
     if (clean === '/dashboard/student/profile') return true;
     if (clean === '/dashboard/settings') return true;
+    if (clean === '/dashboard/announcements') return true;
     if (clean.startsWith('/dashboard/timetable') && clean !== '/dashboard/timetable/new') return true;
     if (clean.startsWith('/dashboard/assignments') && clean !== '/dashboard/assignments/new') return true;
     if (clean === '/dashboard/exams/me') return true;
@@ -299,6 +305,13 @@ export function NavIcon({ name, className = 'h-5 w-5' }: { name: string; classNa
           <circle cx="8.5" cy="7" r="4" strokeLinecap="round" strokeLinejoin="round" />
           <line x1="20" y1="8" x2="20" y2="14" strokeLinecap="round" strokeLinejoin="round" />
           <line x1="23" y1="11" x2="17" y2="11" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case 'announcements':
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />
         </svg>
       );
     case 'settings':

@@ -19,6 +19,8 @@ import { getMyInvoices } from '@/lib/fees-api';
 import type { Invoice } from '@/lib/fees-api';
 import { getMyAttendance } from '@/lib/attendance-api';
 import type { AttendanceSummary, MyAttendance } from '@/lib/attendance-api';
+import { AUDIENCE_LABEL, listAnnouncements } from '@/lib/announcements-api';
+import type { Announcement } from '@/lib/announcements-api';
 
 const INVOICE_STATUS_BADGE: Record<string, string> = {
   PAID: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200',
@@ -106,6 +108,7 @@ export function StudentDashboardView() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [attendance, setAttendance] = useState<MyAttendance | null>(null);
   const [attendanceFailed, setAttendanceFailed] = useState(false);
+  const [announcements, setAnnouncements] = useState<Announcement[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -113,7 +116,7 @@ export function StudentDashboardView() {
     setLoading(true);
     setError(null);
     try {
-      const [stuRes, ttRes, assignRes, examsRes, resRes, invRes, attRes] = await Promise.allSettled([
+      const [stuRes, ttRes, assignRes, examsRes, resRes, invRes, attRes, annRes] = await Promise.allSettled([
         getMyStudent(),
         getMyTimetable(),
         listAssignments(new URLSearchParams({ page: '1', pageSize: '10' })),
@@ -121,6 +124,7 @@ export function StudentDashboardView() {
         getMyResults(),
         getMyInvoices(),
         getMyAttendance(new URLSearchParams({ pageSize: '1' })),
+        listAnnouncements(new URLSearchParams({ pageSize: '3' })),
       ]);
 
       if (stuRes.status === 'fulfilled') {
@@ -140,6 +144,7 @@ export function StudentDashboardView() {
       // Never show a made-up attendance figure: if the request fails, the dashboard says so.
       setAttendance(attRes.status === 'fulfilled' ? attRes.value : null);
       setAttendanceFailed(attRes.status === 'rejected');
+      setAnnouncements(annRes.status === 'fulfilled' ? annRes.value.items : null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Your student dashboard could not be loaded.');
     } finally {
@@ -806,56 +811,45 @@ export function StudentDashboardView() {
         </Card>
       </div>
 
-      {/* ─── H. Announcements & Academic Policies ─────────────────────────── */}
+      {/* ─── H. Announcements ───────────────────────────────────────────────── */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>Academic Notices &amp; Institutional Guidelines</CardTitle>
-              <CardDescription>Official semester policies, compliance mandates, and academic deadlines.</CardDescription>
+              <CardTitle>Announcements</CardTitle>
+              <CardDescription>Latest notices from your college.</CardDescription>
             </div>
             <Link
-              href="/dashboard/files"
+              href="/dashboard/announcements"
               className="text-xs font-semibold text-[hsl(var(--primary))] underline underline-offset-4"
             >
-              Academic Documents →
+              All Announcements →
             </Link>
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-[var(--radius)] border p-4 bg-[hsl(var(--background))] space-y-1.5">
-              <p className="text-xs font-bold uppercase tracking-wider text-[hsl(var(--primary))]">Attendance Rule</p>
-              <p className="text-sm font-semibold">75% Minimum Threshold</p>
-              <p className="text-xs text-[hsl(var(--muted-foreground))] leading-relaxed">
-                Mandatory attendance across all enrolled theory and lab subjects. Students falling below 75% require formal academic debarment review.
-              </p>
+          {announcements === null ? (
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">Announcements could not be loaded right now.</p>
+          ) : announcements.length === 0 ? (
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">No announcements yet.</p>
+          ) : (
+            <div className="grid gap-3 lg:grid-cols-3">
+              {announcements.map((item) => (
+                <Link
+                  key={item.id}
+                  href="/dashboard/announcements"
+                  className="rounded-[var(--radius)] border p-4 bg-[hsl(var(--background))] space-y-1.5 transition-colors hover:border-[hsl(var(--primary))]/50"
+                >
+                  <p className="text-xs font-bold uppercase tracking-wider text-[hsl(var(--primary))]">
+                    {AUDIENCE_LABEL[item.audience]} ·{' '}
+                    {new Date(item.publishedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                  </p>
+                  <p className="text-sm font-semibold">{item.title}</p>
+                  <p className="line-clamp-3 text-xs leading-relaxed text-[hsl(var(--muted-foreground))]">{item.body}</p>
+                </Link>
+              ))}
             </div>
-
-            <div className="rounded-[var(--radius)] border p-4 bg-[hsl(var(--background))] space-y-1.5">
-              <p className="text-xs font-bold uppercase tracking-wider text-[hsl(var(--primary))]">Coursework</p>
-              <p className="text-sm font-semibold">Continuous Evaluation</p>
-              <p className="text-xs text-[hsl(var(--muted-foreground))] leading-relaxed">
-                Assignments submitted after cutoff dates may incur progressive grade deductions. Submit all deliverables before scheduled deadlines.
-              </p>
-            </div>
-
-            <div className="rounded-[var(--radius)] border p-4 bg-[hsl(var(--background))] space-y-1.5">
-              <p className="text-xs font-bold uppercase tracking-wider text-[hsl(var(--primary))]">Examinations</p>
-              <p className="text-sm font-semibold">Admit Cards &amp; Seating</p>
-              <p className="text-xs text-[hsl(var(--muted-foreground))] leading-relaxed">
-                Semester examination schedules are finalized one week in advance. Present your verified physical or digital college ID for paper entry.
-              </p>
-            </div>
-
-            <div className="rounded-[var(--radius)] border p-4 bg-[hsl(var(--background))] space-y-1.5">
-              <p className="text-xs font-bold uppercase tracking-wider text-[hsl(var(--primary))]">Fee Clearance</p>
-              <p className="text-sm font-semibold">Online Gateway Settlement</p>
-              <p className="text-xs text-[hsl(var(--muted-foreground))] leading-relaxed">
-                Pay semester fees seamlessly through CampusOS Razorpay gateway. Immediate downloadable receipts are available under the Fees section.
-              </p>
-            </div>
-          </div>
+          )}
         </CardContent>
       </Card>
     </div>

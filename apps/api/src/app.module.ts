@@ -12,6 +12,7 @@ import { TimetableModule } from './timetable/timetable.module';
 import { FeesModule } from './fees/fees.module';
 import { TasksModule } from './tasks/tasks.module';
 import { VisitorsModule } from './visitors/visitors.module';
+import { AnnouncementsModule } from './announcements/announcements.module';
 import { EventsModule } from './events/events.module';
 
 @Module({
@@ -30,6 +31,7 @@ import { EventsModule } from './events/events.module';
     FeesModule,
     TasksModule,
     VisitorsModule,
+    AnnouncementsModule,
   ],
 })
 export class AppModule {}
