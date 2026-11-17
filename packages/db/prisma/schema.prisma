@@ -53,6 +53,12 @@ enum ResultStatus {
   FAILED
 }
 
+enum MarksStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+}
+
 enum InvoiceStatus {
   DRAFT
   ISSUED
@@ -648,6 +654,10 @@ model ExamSubject {
   examAt     DateTime
   maxMarks   Decimal  @db.Decimal(7, 2)
   passMarks  Decimal  @db.Decimal(7, 2)
+  // Faculty enter marks (DRAFT) and submit them; the HOD or Admin approves them or returns them to DRAFT.
+  marksStatus      MarksStatus @default(DRAFT)
+  marksSubmittedAt DateTime?
+  marksApprovedAt  DateTime?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   college    College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)

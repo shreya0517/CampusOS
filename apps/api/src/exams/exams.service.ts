@@ -6,6 +6,7 @@ import type {
   CreateExamDto,
   CreateExamSubjectDto,
   ExamListQuery,
+  ReviewMarksDto,
   UpdateExamDto,
   UpdateMarksDto,
 } from './exams.dto';
@@ -301,7 +302,90 @@ export class ExamsService {
       };
     });
 
-    return { examSubject, items };
+    const history = await this.marksHistory(examSubjectId, context);
+    return { examSubject, items, history };
+  }
+
+  /** Submissions, approvals and returns for one paper, oldest first. */
+  private async marksHistory(examSubjectId: string, context: AuthorizationContext) {
+    const entries = await this.database.auditLog.findMany({
+      where: { collegeId: context.collegeId, entityType: 'ExamSubject', entityId: examSubjectId },
+      include: { actor: { select: { id: true, displayName: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return entries.map((entry) => ({
+      id: entry.id,
+      action: entry.action,
+      createdAt: entry.createdAt,
+      actor: entry.actor,
+      comment: ((entry.metadata ?? {}) as { comment?: string }).comment ?? null,
+    }));
+  }
+
+  /**
+   * The person entering marks submits a complete sheet for review. Only drafts can be submitted, and the update is
+   * conditional so two clicks can't both succeed.
+   */
+  async submitSubjectMarks(examSubjectId: string, context: AuthorizationContext) {
+    if (context.roles.includes('STUDENT')) denied();
+    const examSubject = await this.database.examSubject.findFirst({ where: { id: examSubjectId, collegeId: context.collegeId } });
+    if (!examSubject) throw examSubjectMissing();
+    await this.assertCanEnterMarks(examSubject, context);
+    if (examSubject!.marksStatus !== 'DRAFT') {
+      throw new ConflictException({ code: 'MARKS_NOT_DRAFT', message: 'These marks have already been submitted.' });
+    }
+    const [sitting, entered] = await Promise.all([
+      this.database.enrollment.findMany({
+        where: {
+          collegeId: context.collegeId,
+          status: 'ACTIVE',
+          ...(examSubject!.sectionId ? { sectionId: examSubject!.sectionId } : { section: { semesterId: examSubject!.semesterId } }),
+        },
+        select: { studentId: true },
+        distinct: ['studentId'],
+      }),
+      this.database.mark.findMany({
+        where: { collegeId: context.collegeId, examSubjectId, OR: [{ isAbsent: true }, { marksObtained: { not: null } }] },
+        select: { studentId: true },
+      }),
+    ]);
+    const done = new Set(entered.map((mark) => mark.studentId));
+    const missing = sitting.filter((row) => !done.has(row.studentId)).length;
+    if (missing > 0) {
+      throw new BadRequestException({ code: 'MARKS_INCOMPLETE', message: `Enter marks or mark absent for every student before submitting (${missing} still missing).` });
+    }
+    await this.database.$transaction(async (tx) => {
+      const moved = await tx.examSubject.updateMany({
+        where: { id: examSubjectId, collegeId: context.collegeId, marksStatus: 'DRAFT' },
+        data: { marksStatus: 'SUBMITTED', marksSubmittedAt: new Date() },
+      });
+      if (moved.count !== 1) throw new ConflictException({ code: 'MARKS_NOT_DRAFT', message: 'These marks have already been submitted.' });
+      await tx.auditLog.create({ data: { collegeId: context.collegeId, actorId: context.userId, action: 'MARKS_SUBMITTED', entityType: 'ExamSubject', entityId: examSubjectId } });
+    });
+    return this.getSubjectMarks(examSubjectId, context);
+  }
+
+  /**
+   * HOD decision 4 (the spec's results workflow): the HOD of the paper's department, or an Admin, approves submitted
+   * marks or returns them to draft with an optional comment.
+   */
+  async reviewSubjectMarks(examSubjectId: string, input: ReviewMarksDto, context: AuthorizationContext) {
+    if (!context.roles.includes('ADMIN') && !context.roles.includes('HOD')) denied();
+    const examSubject = await this.database.examSubject.findFirst({ where: { id: examSubjectId, collegeId: context.collegeId } });
+    if (!examSubject) throw examSubjectMissing();
+    await this.assertCanEnterMarks(examSubject, context);
+    const approved = input.decision === 'APPROVED';
+    await this.database.$transaction(async (tx) => {
+      const moved = await tx.examSubject.updateMany({
+        where: { id: examSubjectId, collegeId: context.collegeId, marksStatus: 'SUBMITTED' },
+        data: approved ? { marksStatus: 'APPROVED', marksApprovedAt: new Date() } : { marksStatus: 'DRAFT', marksSubmittedAt: null },
+      });
+      if (moved.count !== 1) throw new ConflictException({ code: 'MARKS_NOT_SUBMITTED', message: 'Only submitted marks can be reviewed.' });
+      await tx.auditLog.create({
+        data: { collegeId: context.collegeId, actorId: context.userId, action: approved ? 'MARKS_APPROVED' : 'MARKS_RETURNED', entityType: 'ExamSubject', entityId: examSubjectId, metadata: input.comment ? { comment: input.comment } : undefined },
+      });
+    });
+    return this.getSubjectMarks(examSubjectId, context);
   }
 
   async updateSubjectMarks(examSubjectId: string, input: UpdateMarksDto, context: AuthorizationContext) {
@@ -312,6 +396,9 @@ export class ExamsService {
     });
     if (!examSubject) throw examSubjectMissing();
     await this.assertCanEnterMarks(examSubject, context);
+    if (examSubject!.marksStatus !== 'DRAFT') {
+      throw new ConflictException({ code: 'MARKS_LOCKED', message: 'These marks have been submitted for review and can no longer be edited. Ask your HOD to return them if a change is needed.' });
+    }
 
     const maxMarks = Number(examSubject.maxMarks);
 
@@ -373,8 +460,8 @@ export class ExamsService {
   }
 
   async calculateAndPublishResults(examId: string, context: AuthorizationContext) {
-    // Faculty enter marks; publishing results stays with HOD and Admin.
-    if (!context.roles.includes('ADMIN') && !context.roles.includes('HOD')) denied();
+    // HOD decision 4: faculty enter marks, the HOD approves them, and Admin publishes results.
+    if (!context.roles.includes('ADMIN')) denied();
 
     const exam = await this.database.exam.findFirst({
       where: { id: examId, collegeId: context.collegeId },
@@ -390,6 +477,10 @@ export class ExamsService {
 
     if (exam.examSubjects.length === 0) {
       throw new BadRequestException({ code: 'NO_EXAM_SUBJECTS', message: 'Exam has no scheduled subjects.' });
+    }
+    const notApproved = exam.examSubjects.filter((paper) => paper.marksStatus !== 'APPROVED').length;
+    if (notApproved > 0) {
+      throw new ConflictException({ code: 'MARKS_NOT_APPROVED', message: `Results can be published once every paper's marks are approved (${notApproved} not approved yet).` });
     }
 
     // Group marks by studentId

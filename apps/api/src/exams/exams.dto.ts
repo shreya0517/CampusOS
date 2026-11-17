@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { ExamStatus } from '@prisma/client';
 
 export type CreateExamDto = {
@@ -161,4 +162,18 @@ export function parseUpdateMarksDto(body: unknown): UpdateMarksDto {
   });
 
   return { marks };
+}
+
+export type ReviewMarksDto = { decision: 'APPROVED' | 'RETURNED'; comment?: string };
+
+/** An HOD or Admin approves submitted marks or returns them to the faculty member, optionally with a comment. */
+export function parseReviewMarksDto(body: unknown): ReviewMarksDto {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const invalid = (): never => {
+    throw new BadRequestException({ code: 'INVALID_INPUT', message: 'Choose APPROVED or RETURNED, with an optional comment of up to 500 characters.' });
+  };
+  if (b.decision !== 'APPROVED' && b.decision !== 'RETURNED') invalid();
+  if (b.comment !== undefined && (typeof b.comment !== 'string' || b.comment.trim().length > 500)) invalid();
+  const comment = typeof b.comment === 'string' && b.comment.trim() ? b.comment.trim() : undefined;
+  return { decision: b.decision as ReviewMarksDto['decision'], comment };
 }

@@ -8,6 +8,7 @@ import {
   parseCreateExamDto,
   parseCreateExamSubjectDto,
   parseExamListQuery,
+  parseReviewMarksDto,
   parseUpdateExamDto,
   parseUpdateMarksDto,
 } from './exams.dto';
@@ -97,8 +98,20 @@ export class ExamsController {
     return this.service.updateSubjectMarks(examSubjectId, input, context);
   }
 
-  @Post(':id/calculate-results')
+  @Post(':id/subjects/:examSubjectId/marks/submit')
+  @RequireRoles('ADMIN', 'HOD', 'FACULTY')
+  async submitSubjectMarks(@Param('examSubjectId') examSubjectId: string, @CurrentAuthorization() context: AuthorizationContext) {
+    return this.service.submitSubjectMarks(examSubjectId, context);
+  }
+
+  @Post(':id/subjects/:examSubjectId/marks/review')
   @RequireRoles('ADMIN', 'HOD')
+  async reviewSubjectMarks(@Param('examSubjectId') examSubjectId: string, @Body() body: unknown, @CurrentAuthorization() context: AuthorizationContext) {
+    return this.service.reviewSubjectMarks(examSubjectId, parseReviewMarksDto(body), context);
+  }
+
+  @Post(':id/calculate-results')
+  @RequireRoles('ADMIN')
   async calculateAndPublishResults(@Param('id') id: string, @CurrentAuthorization() context: AuthorizationContext) {
     return this.service.calculateAndPublishResults(id, context);
   }
