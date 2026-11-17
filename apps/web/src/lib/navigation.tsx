@@ -166,6 +166,7 @@ export function isRouteAllowedForRole(pathname: string, role: CanonicalRole): bo
     if (clean.startsWith('/dashboard/fees')) return false;
     if (clean.startsWith('/dashboard/departments')) return false;
     if (clean === '/dashboard/tasks/new') return false; // tasks creation is ADMIN/HOD only
+    if (clean === '/dashboard/timetable/new') return false; // timetables are built by Admin
     if (clean === '/foundation') return false;
 
     // Allowed: tasks (list, my, view), attendance, timetable, assignments, students, exams, faculty, faculty/me, files, visitors
@@ -175,6 +176,7 @@ export function isRouteAllowedForRole(pathname: string, role: CanonicalRole): bo
   // Specific restrictions for HOD
   if (role === 'HOD') {
     if (clean === '/dashboard/student' || clean.startsWith('/dashboard/student/')) return false;
+    if (clean === '/dashboard/timetable/new') return false; // timetables are built by Admin
     if (clean === '/dashboard/institutional-overview') return false;
     if (clean === '/dashboard/faculty-performance') return false;
     if (clean === '/foundation') return false;

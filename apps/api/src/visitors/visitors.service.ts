@@ -111,15 +111,15 @@ export class VisitorsService {
 
     const newStatus = input.decision === 'APPROVED' ? VisitorStatus.APPROVED : VisitorStatus.REJECTED;
 
-    return this.database.visitor.update({
-      where: { id },
-      data: {
-        status: newStatus,
-        approvedByUserId: context.userId,
-        approvedAt: new Date(),
-      },
-      include: visitorInclude,
+    // Only a still-pending request is updated, so if two reviewers decide at once the second one gets a conflict.
+    const decided = await this.database.visitor.updateMany({
+      where: { id, collegeId: context.collegeId, status: VisitorStatus.PENDING },
+      data: { status: newStatus, approvedByUserId: context.userId, approvedAt: new Date() },
     });
+    if (decided.count !== 1) {
+      throw new ConflictException({ code: 'VISITOR_ALREADY_REVIEWED', message: 'This visitor request has already been reviewed.' });
+    }
+    return this.database.visitor.findFirst({ where: { id, collegeId: context.collegeId }, include: visitorInclude });
   }
 
   async myVisitors(context: AuthorizationContext): Promise<unknown> {

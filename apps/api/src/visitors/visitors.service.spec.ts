@@ -8,7 +8,7 @@ const admin: AuthorizationContext = { userId: 'admin-1', collegeId: 'col-a', rol
 const hodScope = { OR: [{ host: { facultyProfiles: { some: { departmentId: 'dept-a' } } } }, { hostUserId: null, registeredBy: { facultyProfiles: { some: { departmentId: 'dept-a' } } } }] };
 
 describe('VisitorsService department scope', () => {
-  const database = { visitor: { findMany: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0), findFirst: jest.fn(), update: jest.fn().mockResolvedValue({}) } };
+  const database = { visitor: { findMany: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0), findFirst: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) } };
   const service = new VisitorsService(database as never);
   beforeEach(() => jest.clearAllMocks());
 
@@ -27,7 +27,7 @@ describe('VisitorsService department scope', () => {
     await expect(service.getVisitor('v-1', hod)).rejects.toBeInstanceOf(NotFoundException);
     await expect(service.reviewVisitor('v-1', { decision: 'APPROVED' }, hod)).rejects.toBeInstanceOf(NotFoundException);
     expect(database.visitor.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'v-1', collegeId: 'col-a', ...hodScope } }));
-    expect(database.visitor.update).not.toHaveBeenCalled();
+    expect(database.visitor.updateMany).not.toHaveBeenCalled();
   });
 
   it('only reviews pending requests', async () => {
@@ -35,6 +35,15 @@ describe('VisitorsService department scope', () => {
     await expect(service.reviewVisitor('v-1', { decision: 'REJECTED' }, admin)).rejects.toBeInstanceOf(ConflictException);
     database.visitor.findFirst.mockResolvedValue({ id: 'v-1', status: VisitorStatus.PENDING });
     await service.reviewVisitor('v-1', { decision: 'APPROVED' }, hod);
-    expect(database.visitor.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: VisitorStatus.APPROVED, approvedByUserId: 'hod-1' }) }));
+    expect(database.visitor.updateMany).toHaveBeenCalledWith({
+      where: { id: 'v-1', collegeId: 'col-a', status: VisitorStatus.PENDING },
+      data: expect.objectContaining({ status: VisitorStatus.APPROVED, approvedByUserId: 'hod-1' }),
+    });
+  });
+
+  it('turns a review that lost a race into a conflict', async () => {
+    database.visitor.findFirst.mockResolvedValue({ id: 'v-1', status: VisitorStatus.PENDING });
+    database.visitor.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(service.reviewVisitor('v-1', { decision: 'REJECTED' }, admin)).rejects.toBeInstanceOf(ConflictException);
   });
 });

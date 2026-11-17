@@ -132,5 +132,7 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 ## HOD Department Boundaries
 
 - POST /api/v1/tasks/:id/assign: the assignee must be an active HOD or FACULTY account in the college (otherwise 400 INVALID_ASSIGNEE). An HOD may only assign to faculty in their own department (403), and assigning the same person twice returns 409 ALREADY_ASSIGNED.
-- GET /api/v1/visitors, GET /api/v1/visitors/:id and PUT /api/v1/visitors/:id/review: an HOD only reaches visitors whose host is in their department, or, when no host is named, whose registrant is in it (404 otherwise). Only PENDING requests can be reviewed (409 VISITOR_ALREADY_REVIEWED). ADMIN reaches every visitor in the college.
+- GET /api/v1/visitors, GET /api/v1/visitors/:id and PUT /api/v1/visitors/:id/review: an HOD only reaches visitors whose host is in their department, or, when no host is named, whose registrant is in it (404 otherwise). Only PENDING requests can be reviewed, atomically, so a second concurrent decision gets 409 VISITOR_ALREADY_REVIEWED. ADMIN reaches every visitor in the college.
 - GET /api/v1/timetable: HOD lists only their department's timetable; FACULTY lists only the classes they teach; STUDENT lists only their own sections.
+- GET /api/v1/timetable/me: STUDENT gets their sections; FACULTY and HOD get the classes they teach; ADMIN gets the whole college.
+- POST /api/v1/timetable and DELETE /api/v1/timetable/:id: ADMIN only (HOD decision 3).
