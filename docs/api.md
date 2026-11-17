@@ -117,5 +117,8 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 ## Attendance and Marks Entry
 
 - POST /api/v1/attendance and PUT /api/v1/attendance/:id: every record must name a different student who is actively enrolled in the class's section; otherwise 400 DUPLICATE_STUDENT or 400 STUDENT_NOT_IN_CLASS.
+- GET /api/v1/attendance/:id includes `correctionWindowEndsAt`: FACULTY may correct a session for 48 hours after it was first saved; later PUTs from faculty return 403 CORRECTION_WINDOW_CLOSED. HOD and ADMIN are not limited by the window.
+- Marking a session and every correction that changes a record are written to the audit log (ATTENDANCE_MARKED, ATTENDANCE_CORRECTED) with the actor and, for corrections, each student's status and note before and after.
+- GET /api/v1/attendance/:id/history: ADMIN, HOD and FACULTY who can open the session. Returns the log oldest first: { id, action, createdAt, actor, changes[] } with each change's student.
 - GET and PUT /api/v1/exams/:id/subjects/:examSubjectId/marks: ADMIN reaches every paper, HOD only papers in their department, FACULTY only papers for a subject they teach in that section (or semester, when the paper covers every section); otherwise 403. Marks must name different students enrolled for the paper; otherwise 400 DUPLICATE_STUDENT or 400 STUDENT_NOT_IN_EXAM.
 - POST /api/v1/exams/:id/calculate-results: ADMIN and HOD only. Faculty enter marks but don't publish results.
