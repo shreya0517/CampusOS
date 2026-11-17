@@ -13,7 +13,8 @@ import type { Department } from '@/lib/faculty-api';
 export default function DepartmentsPage() {
   const { primaryRole } = useAuth();
   const isAdmin = primaryRole === 'Admin';
-  const canEdit = primaryRole === 'Admin' || primaryRole === 'HOD';
+  // Departments are edited by Admin.
+  const canEdit = primaryRole === 'Admin';
 
   const [items, setItems] = useState<Department[]>([]);
   const [error, setError] = useState<string | null>(null);
