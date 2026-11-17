@@ -22,8 +22,11 @@ export class StudentsService {
   async list(query: StudentListQuery, context: AuthorizationContext) {
     if (context.roles.includes('STUDENT')) throw denied();
     const departmentId = this.scopedDepartment(context, query.departmentId);
-    const sectionWhere = { ...(departmentId ? { semester: { course: { departmentId } } } : {}), ...(query.courseId ? { semester: { courseId: query.courseId } } : {}), ...(query.semesterId ? { semesterId: query.semesterId } : {}), ...(query.sectionId ? { id: query.sectionId } : {}) };
-    const where = { collegeId: context.collegeId, ...(query.search ? { OR: [{ studentCode: { contains: query.search, mode: 'insensitive' as const } }, { firstName: { contains: query.search, mode: 'insensitive' as const } }, { lastName: { contains: query.search, mode: 'insensitive' as const } }] } : {}), ...(Object.keys(sectionWhere).length ? { enrollments: { some: { section: sectionWhere } } } : {}) };
+    // Department and course filters are merged into one semester condition; a courseId must never replace the department scope.
+    const semesterWhere = { ...(departmentId ? { course: { departmentId } } : {}), ...(query.courseId ? { courseId: query.courseId } : {}) };
+    const sectionWhere = { ...(Object.keys(semesterWhere).length ? { semester: semesterWhere } : {}), ...(query.semesterId ? { semesterId: query.semesterId } : {}), ...(query.sectionId ? { id: query.sectionId } : {}), ...this.teachingScope(context) };
+    const enrollmentWhere = { ...(Object.keys(sectionWhere).length ? { section: sectionWhere } : {}), ...(this.isFacultyOnly(context) ? { status: EnrollmentStatus.ACTIVE } : {}) };
+    const where = { collegeId: context.collegeId, ...(query.search ? { OR: [{ studentCode: { contains: query.search, mode: 'insensitive' as const } }, { firstName: { contains: query.search, mode: 'insensitive' as const } }, { lastName: { contains: query.search, mode: 'insensitive' as const } }] } : {}), ...(Object.keys(enrollmentWhere).length ? { enrollments: { some: enrollmentWhere } } : {}) };
     const [items, total] = await Promise.all([this.database.student.findMany({ where, include: studentInclude, omit: this.contactOmit(context), orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }], skip: (query.page - 1) * query.pageSize, take: query.pageSize }), this.database.student.count({ where })]);
     return { items, page: query.page, pageSize: query.pageSize, total };
   }
@@ -42,6 +45,15 @@ export class StudentsService {
     return this.me(context);
   }
 
+  private isFacultyOnly(context: AuthorizationContext): boolean {
+    return context.roles.includes('FACULTY') && !context.roles.includes('HOD') && !context.roles.includes('ADMIN') && !context.roles.includes('SUPER_ADMIN');
+  }
+
+  /** Faculty only reach students in sections where they teach a class; being in the same department is not enough. */
+  private teachingScope(context: AuthorizationContext) {
+    return this.isFacultyOnly(context) ? { classes: { some: { faculty: { userId: context.userId } } } } : {};
+  }
+
   /** Faculty get academic details only; a student's phone and address stay with Admin and HOD. */
   private contactOmit(context: AuthorizationContext) {
     const facultyOnly = context.roles.includes('FACULTY') && !context.roles.includes('ADMIN') && !context.roles.includes('HOD') && !context.roles.includes('SUPER_ADMIN');
@@ -50,7 +62,7 @@ export class StudentsService {
 
   private assertManager(context: AuthorizationContext) { if (!context.roles.includes('ADMIN') && !context.roles.includes('HOD')) throw denied(); }
   private scopedDepartment(context: AuthorizationContext, requested?: string) { if (context.roles.includes('HOD') || context.roles.includes('FACULTY')) { if (!context.departmentId || requested && requested !== context.departmentId) throw denied(); return context.departmentId; } return requested; }
-  private studentWhere(id: string, context: AuthorizationContext) { if (context.roles.includes('STUDENT')) return { id, collegeId: context.collegeId, userId: context.userId }; const departmentId = this.scopedDepartment(context); return { id, collegeId: context.collegeId, ...(departmentId ? { enrollments: { some: { section: { semester: { course: { departmentId } } } } } } : {}) }; }
+  private studentWhere(id: string, context: AuthorizationContext) { if (context.roles.includes('STUDENT')) return { id, collegeId: context.collegeId, userId: context.userId }; if (this.isFacultyOnly(context)) return { id, collegeId: context.collegeId, enrollments: { some: { status: EnrollmentStatus.ACTIVE, section: this.teachingScope(context) } } }; const departmentId = this.scopedDepartment(context); return { id, collegeId: context.collegeId, ...(departmentId ? { enrollments: { some: { section: { semester: { course: { departmentId } } } } } } : {}) }; }
   private async sectionForContext(sectionId: string, context: AuthorizationContext) { const section = await this.database.section.findFirst({ where: { id: sectionId, collegeId: context.collegeId }, include: { semester: { include: { course: { include: { department: true } } } } } }); if (!section) throw denied(); const departmentId = this.scopedDepartment(context); if (departmentId && section.semester.course.departmentId !== departmentId) throw denied(); return section; }
 }
 

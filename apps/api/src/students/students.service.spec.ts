@@ -77,3 +77,34 @@ describe('StudentsService', () => {
     });
   });
 });
+
+describe('StudentsService faculty and HOD scope', () => {
+  const faculty: AuthorizationContext = { userId: 'fac-user', collegeId: 'college-a', roles: ['FACULTY'], permissions: [], departmentId: 'department-a' };
+  const database = { student: { findMany: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0), findFirst: jest.fn().mockResolvedValue(null) } };
+  const service = new StudentsService(database as never);
+  const listWhere = (): unknown => (database.student.findMany.mock.calls.at(-1)?.[0] as { where: unknown }).where;
+  beforeEach(() => jest.clearAllMocks());
+
+  it('limits faculty to active students in sections where they teach', async () => {
+    await service.list({ page: 1, pageSize: 20 }, faculty);
+    expect(listWhere()).toEqual({
+      collegeId: 'college-a',
+      enrollments: { some: { section: { semester: { course: { departmentId: 'department-a' } }, classes: { some: { faculty: { userId: 'fac-user' } } } }, status: 'ACTIVE' } },
+    });
+  });
+
+  it('applies the same teaching scope to a single student lookup', async () => {
+    await expect(service.get('student-x', faculty)).rejects.toThrow();
+    expect(database.student.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'student-x', collegeId: 'college-a', enrollments: { some: { status: 'ACTIVE', section: { classes: { some: { faculty: { userId: 'fac-user' } } } } } } },
+    }));
+  });
+
+  it('keeps the department filter when an HOD also filters by course', async () => {
+    await service.list({ courseId: 'course-other', page: 1, pageSize: 20 }, hod);
+    expect(listWhere()).toEqual({
+      collegeId: 'college-a',
+      enrollments: { some: { section: { semester: { course: { departmentId: 'department-a' }, courseId: 'course-other' } } } },
+    });
+  });
+});
