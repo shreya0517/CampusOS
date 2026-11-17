@@ -121,7 +121,12 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 - Marking a session and every correction that changes a record are written to the audit log (ATTENDANCE_MARKED, ATTENDANCE_CORRECTED) with the actor and, for corrections, each student's status and note before and after; a student left out of a correction is logged with `to: null` (removed).
 - GET /api/v1/attendance/:id/history: ADMIN, HOD and FACULTY who can open the session. Returns the log oldest first: { id, action, createdAt, actor, changes[] } with each change's student.
 - GET and PUT /api/v1/exams/:id/subjects/:examSubjectId/marks: ADMIN reaches every paper, HOD only papers in their department, FACULTY only papers for a subject they teach in that section (or semester, when the paper covers every section); otherwise 403. Marks must name different students enrolled for the paper; otherwise 400 DUPLICATE_STUDENT or 400 STUDENT_NOT_IN_EXAM.
-- POST /api/v1/exams/:id/calculate-results: ADMIN and HOD only. Faculty enter marks but don't publish results.
+- Marks approval (HOD decision 4): each paper has `marksStatus` DRAFT, SUBMITTED or APPROVED.
+  - PUT .../marks only works while DRAFT; otherwise 409 MARKS_LOCKED.
+  - POST /api/v1/exams/:id/subjects/:examSubjectId/marks/submit: whoever can enter marks for the paper. The sheet must be complete (every active student has marks or is absent), otherwise 400 MARKS_INCOMPLETE. DRAFT becomes SUBMITTED.
+  - POST /api/v1/exams/:id/subjects/:examSubjectId/marks/review: HOD of the paper's department, or ADMIN. Body { decision: APPROVED | RETURNED, comment? }. SUBMITTED becomes APPROVED, or DRAFT when returned; 409 MARKS_NOT_SUBMITTED otherwise.
+  - Submissions and reviews are written to the audit log; GET .../marks returns them as `history`.
+- POST /api/v1/exams/:id/calculate-results: ADMIN only, and only once every paper of the exam is APPROVED (otherwise 409 MARKS_NOT_APPROVED).
 - POST /api/v1/exams/:id/subjects: the subject and the optional section must belong to the given semester; otherwise 400 INVALID_EXAM_SUBJECT. For HOD marks access, both the semester and the section of a paper must be in the HOD's department.
 
 ## My Classes

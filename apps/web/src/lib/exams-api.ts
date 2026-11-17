@@ -21,6 +21,20 @@ export type Exam = {
   studentMarks?: Mark[];
 };
 
+export type MarksStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED';
+export type MarksHistoryEntry = {
+  id: string;
+  action: 'MARKS_SUBMITTED' | 'MARKS_APPROVED' | 'MARKS_RETURNED';
+  createdAt: string;
+  actor: { id: string; displayName: string } | null;
+  comment: string | null;
+};
+type MarksSheet = {
+  examSubject: ExamSubject;
+  items: Array<{ student: { id: string; studentCode: string; firstName: string; lastName: string }; mark: Mark | null }>;
+  history: MarksHistoryEntry[];
+};
+
 export type ExamSubject = {
   id: string;
   collegeId: string;
@@ -31,6 +45,9 @@ export type ExamSubject = {
   examAt: string;
   maxMarks: number;
   passMarks: number;
+  marksStatus: MarksStatus;
+  marksSubmittedAt?: string | null;
+  marksApprovedAt?: string | null;
   subject?: { id: string; code: string; name: string };
   semester?: { id: string; name: string };
   section?: { id: string; code: string };
@@ -114,11 +131,16 @@ export function removeExamSubject(examId: string, examSubjectId: string): Promis
 export function getSubjectMarks(
   examId: string,
   examSubjectId: string,
-): Promise<{
-  examSubject: ExamSubject;
-  items: Array<{ student: { id: string; studentCode: string; firstName: string; lastName: string }; mark: Mark | null }>;
-}> {
+): Promise<MarksSheet> {
   return authenticatedRequest(`/exams/${examId}/subjects/${examSubjectId}/marks`);
+}
+
+export function submitSubjectMarks(examId: string, examSubjectId: string): Promise<MarksSheet> {
+  return authenticatedRequest(`/exams/${examId}/subjects/${examSubjectId}/marks/submit`, { method: 'POST' });
+}
+
+export function reviewSubjectMarks(examId: string, examSubjectId: string, input: { decision: 'APPROVED' | 'RETURNED'; comment?: string }): Promise<MarksSheet> {
+  return authenticatedRequest(`/exams/${examId}/subjects/${examSubjectId}/marks/review`, { method: 'POST', body: JSON.stringify(input) });
 }
 
 export function updateSubjectMarks(
