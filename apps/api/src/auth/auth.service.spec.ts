@@ -127,4 +127,42 @@ describe('AuthService', () => {
     database.user.findUnique.mockResolvedValue(null);
     await expect(service.requestPasswordReset({ collegeCode: 'DEMO', email: 'missing@example.test' })).resolves.toBeUndefined();
   });
+
+  describe('changePassword', () => {
+    const setup = async () => {
+      const database = createDatabase();
+      database.user.findUnique.mockResolvedValue({ ...activeUser, passwordHash: await hashPassword('current-password-123') });
+      database.$transaction.mockImplementation(async (callback) => callback(database));
+      const service = new AuthService(database as never);
+      const token = (service as unknown as { createAccessToken(sub: string, collegeId: string, sid: string): string }).createAccessToken(activeUser.id, activeUser.collegeId, activeSession.id);
+      return { database, service, token };
+    };
+
+    it('rejects a wrong current password with 400 and changes nothing', async () => {
+      const { database, service, token } = await setup();
+      await expect(service.changePassword(token, { currentPassword: 'wrong-password-123', newPassword: 'another-strong-password' })).rejects.toMatchObject({ response: { code: 'INVALID_CURRENT_PASSWORD' } });
+      expect(database.user.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a short or unchanged new password', async () => {
+      const { database, service, token } = await setup();
+      await expect(service.changePassword(token, { currentPassword: 'current-password-123', newPassword: 'short' })).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.changePassword(token, { currentPassword: 'current-password-123', newPassword: 'current-password-123' })).rejects.toBeInstanceOf(BadRequestException);
+      expect(database.user.update).not.toHaveBeenCalled();
+    });
+
+    it('stores a new hash and signs out every other session but the current one', async () => {
+      const { database, service, token } = await setup();
+      await service.changePassword(token, { currentPassword: 'current-password-123', newPassword: 'another-strong-password' });
+      const stored = database.user.update.mock.calls[0][0].data.passwordHash as string;
+      expect(stored).not.toBe('another-strong-password');
+      await expect(verifyPassword('another-strong-password', stored)).resolves.toBe(true);
+      expect(database.authSession.updateMany).toHaveBeenCalledWith({ where: { collegeId: activeUser.collegeId, userId: activeUser.id, revokedAt: null, id: { not: activeSession.id } }, data: { revokedAt: expect.any(Date) } });
+    });
+
+    it('rejects a forged access token', async () => {
+      const { service } = await setup();
+      await expect(service.changePassword('invalid.token.value', { currentPassword: 'current-password-123', newPassword: 'another-strong-password' })).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+  });
 });

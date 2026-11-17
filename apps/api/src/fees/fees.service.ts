@@ -11,6 +11,9 @@ import type {
   VerifyRazorpayPaymentDto,
 } from './fees.dto';
 
+/** Students in exam and fee responses carry only identity fields, never contact details. */
+const STUDENT_SUMMARY = { select: { id: true, studentCode: true, firstName: true, lastName: true } };
+
 const denied = (): never => {
   throw new ForbiddenException({ code: 'FORBIDDEN', message: 'You are not authorized to access this resource.' });
 };
@@ -110,7 +113,7 @@ export class FeesService {
         dueOn: input.dueOn ? new Date(input.dueOn) : null,
       },
       include: {
-        student: true,
+        student: STUDENT_SUMMARY,
         feeStructure: true,
       },
     });
@@ -142,7 +145,7 @@ export class FeesService {
       take: query.pageSize,
       orderBy: { createdAt: 'desc' },
       include: {
-        student: true,
+        student: STUDENT_SUMMARY,
         feeStructure: true,
         payments: {
           include: {
@@ -190,7 +193,7 @@ export class FeesService {
   async createRazorpayOrder(input: CreateRazorpayOrderDto, context: AuthorizationContext) {
     const invoice = await this.database.invoice.findFirst({
       where: { id: input.invoiceId, collegeId: context.collegeId },
-      include: { student: true },
+      include: { student: STUDENT_SUMMARY },
     });
 
     if (!invoice) throw invoiceMissing();
@@ -322,7 +325,7 @@ export class FeesService {
           include: {
             invoice: {
               include: {
-                student: true,
+                student: STUDENT_SUMMARY,
                 feeStructure: true,
               },
             },

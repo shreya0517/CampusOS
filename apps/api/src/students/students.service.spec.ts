@@ -1,7 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
 import { StudentsService } from './students.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
-import { parseCreateStudentDto, parseEnrollmentDto, parseStudentListQuery } from './students.dto';
+import { parseCreateStudentDto, parseEnrollmentDto, parseStudentListQuery, parseUpdateMyContactDto } from './students.dto';
 
 const admin: AuthorizationContext = { userId: 'admin', collegeId: 'college-a', roles: ['ADMIN'], permissions: [], departmentId: null };
 const hod: AuthorizationContext = { userId: 'hod', collegeId: 'college-a', roles: ['HOD'], permissions: [], departmentId: 'department-a' };
@@ -38,5 +38,42 @@ describe('StudentsService', () => {
     await expect(service.me(student)).resolves.toEqual(record);
     await expect(service.get('student-b', student)).rejects.toMatchObject({ response: expect.objectContaining({ code: 'STUDENT_NOT_FOUND' }) });
     expect(database.student.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: { id: 'student-b', collegeId: 'college-a', userId: 'user-a' } }));
+  });
+
+  describe('own contact details', () => {
+    const faculty: AuthorizationContext = { userId: 'fac', collegeId: 'college-a', roles: ['FACULTY'], permissions: [], departmentId: 'department-a' };
+
+    it('lets a student update only their own phone and address', async () => {
+      database.student.findFirst.mockResolvedValue(record);
+      database.student.update.mockResolvedValue(record);
+      await service.updateMyContact({ phone: '+91 98765 43210', address: null }, student);
+      expect(database.student.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { collegeId: 'college-a', userId: 'user-a' } }));
+      expect(database.student.update).toHaveBeenCalledWith({ where: { collegeId_id: { collegeId: 'college-a', id: 'student-a' } }, data: { phone: '+91 98765 43210', address: null } });
+    });
+
+    it('does not let staff use the student self-service update', async () => {
+      await expect(service.updateMyContact({ phone: '9876543210' }, admin)).rejects.toBeInstanceOf(ForbiddenException);
+      expect(database.student.update).not.toHaveBeenCalled();
+    });
+
+    it('accepts only phone and address in the body, and checks their format', () => {
+      expect(parseUpdateMyContactDto({ phone: ' 98765 43210 ', address: '' })).toEqual({ phone: '98765 43210', address: null });
+      expect(parseUpdateMyContactDto({ studentCode: 'X', phone: '9876543210' })).toEqual({ phone: '9876543210', address: undefined });
+      expect(() => parseUpdateMyContactDto({ studentCode: 'X' })).toThrow();
+      expect(() => parseUpdateMyContactDto({ phone: 'call me' })).toThrow();
+      expect(() => parseUpdateMyContactDto({ phone: '1------2' })).toThrow();
+      expect(() => parseUpdateMyContactDto({ phone: '123 4567' })).toThrow();
+      expect(parseUpdateMyContactDto({ phone: '+91-98765-43210' }).phone).toBe('+91-98765-43210');
+      expect(() => parseUpdateMyContactDto({ address: 'x'.repeat(301) })).toThrow();
+    });
+
+    it('hides phone and address from faculty but not from admin', async () => {
+      database.student.findMany.mockResolvedValue([]);
+      database.student.count.mockResolvedValue(0);
+      await service.list({ page: 1, pageSize: 20 }, faculty);
+      expect(database.student.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ omit: { phone: true, address: true } }));
+      await service.list({ page: 1, pageSize: 20 }, admin);
+      expect(database.student.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ omit: undefined }));
+    });
   });
 });
