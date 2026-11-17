@@ -1,3 +1,4 @@
+import { ForbiddenException } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import type { DatabaseService } from '../database.service';
 import type { EventsService } from '../events/events.service';
@@ -21,6 +22,9 @@ type MockDb = {
     update: jest.Mock;
   };
   faculty: {
+    findFirst: jest.Mock;
+  };
+  user: {
     findFirst: jest.Mock;
   };
 };
@@ -65,6 +69,10 @@ describe('TasksService WebSocket Event Emissions', () => {
       },
       faculty: {
         findFirst: jest.fn(),
+      },
+      // Assignees are active faculty in department dept-1 unless a test says otherwise.
+      user: {
+        findFirst: jest.fn().mockResolvedValue({ facultyProfiles: [{ departmentId: 'dept-1' }] }),
       },
     };
 
@@ -328,5 +336,47 @@ describe('TasksService my assignment stats', () => {
     const stats = await service.getMyAssignmentStats({ userId: 'faculty-1', collegeId: 'college-1', roles: ['FACULTY'], permissions: [], departmentId: 'dept-1' });
     expect(stats).toEqual({ pending: 2, inProgress: 1, submitted: 3, approved: 4, rework: 1, total: 11 });
     expect(database.taskAssignment.count).toHaveBeenCalledWith({ where: { collegeId: 'college-1', assigneeUserId: 'faculty-1', status: 'PENDING' } });
+  });
+});
+
+describe('TasksService assignment boundaries', () => {
+  const hod: AuthorizationContext = { userId: 'hod-1', collegeId: 'college-1', roles: ['HOD'], permissions: [], departmentId: 'dept-1' };
+  const admin: AuthorizationContext = { userId: 'admin-1', collegeId: 'college-1', roles: ['ADMIN'], permissions: [], departmentId: null };
+  const database = {
+    task: { findFirst: jest.fn().mockResolvedValue({ id: 'task-1', title: 'Report', departmentId: 'dept-1' }) },
+    taskAssignment: { create: jest.fn() },
+    user: { findFirst: jest.fn() },
+  };
+  const events = { emitTaskAssigned: jest.fn() };
+  const service = new TasksService(database as unknown as DatabaseService, events as unknown as EventsService);
+  beforeEach(() => jest.clearAllMocks());
+
+  it('only assigns to active HOD or faculty accounts in the college', async () => {
+    database.user.findFirst.mockResolvedValue(null);
+    await expect(service.assignTask('task-1', { assigneeUserId: 'student-user' }, admin)).rejects.toMatchObject({ response: { code: 'INVALID_ASSIGNEE' } });
+    expect(database.user.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'student-user', collegeId: 'college-1', status: 'ACTIVE', userRoles: { some: { role: { name: { in: ['HOD', 'FACULTY'] } } } } },
+    }));
+    expect(database.taskAssignment.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps an HOD from assigning to faculty in another department', async () => {
+    database.user.findFirst.mockResolvedValue({ facultyProfiles: [{ departmentId: 'dept-2' }] });
+    await expect(service.assignTask('task-1', { assigneeUserId: 'other-faculty' }, hod)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(database.taskAssignment.create).not.toHaveBeenCalled();
+  });
+
+  it('lets admins assign across departments and HODs within theirs', async () => {
+    database.user.findFirst.mockResolvedValue({ facultyProfiles: [{ departmentId: 'dept-2' }] });
+    database.taskAssignment.create.mockResolvedValue({ id: 'a-1' });
+    await expect(service.assignTask('task-1', { assigneeUserId: 'other-faculty' }, admin)).resolves.toEqual({ id: 'a-1' });
+    database.user.findFirst.mockResolvedValue({ facultyProfiles: [{ departmentId: 'dept-1' }] });
+    await expect(service.assignTask('task-1', { assigneeUserId: 'own-faculty' }, hod)).resolves.toEqual({ id: 'a-1' });
+  });
+
+  it('reports a duplicate assignment as a conflict', async () => {
+    database.user.findFirst.mockResolvedValue({ facultyProfiles: [{ departmentId: 'dept-1' }] });
+    database.taskAssignment.create.mockRejectedValue({ code: 'P2002' });
+    await expect(service.assignTask('task-1', { assigneeUserId: 'own-faculty' }, hod)).rejects.toMatchObject({ response: { code: 'ALREADY_ASSIGNED' } });
   });
 });
