@@ -122,7 +122,8 @@ describe('StudentsService HOD decision 1', () => {
   });
 
   it("still lets an HOD correct a student's details in their department", async () => {
-    await expect(service.update('student-a', { firstName: 'Aarav' }, hod)).resolves.toEqual({ id: 'student-a' });
+    // The response now also carries `account` (null here, as the mock row has no user).
+    await expect(service.update('student-a', { firstName: 'Aarav' }, hod)).resolves.toEqual({ id: 'student-a', account: null });
     expect(database.student.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: 'student-a', collegeId: 'college-a' }) }));
   });
 });

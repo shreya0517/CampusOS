@@ -82,6 +82,12 @@ describe('StudentsService admin features', () => {
     await expect(service.setAccountStatus('student-a', { status: 'INACTIVE' }, hod)).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('keeps the account details in the response after a profile edit', async () => {
+    const database = { ...createDatabase(), student: { ...createDatabase().student, update: jest.fn().mockResolvedValue(studentRow) } };
+    const service = new StudentsService(database as never);
+    await expect(service.update('student-a', { firstName: 'Aarav' }, admin)).resolves.toMatchObject({ account: { email: 'aarav@college.test', status: 'ACTIVE' } });
+  });
+
   it('refuses to change the status of a student without an account', async () => {
     const database = createDatabase();
     database.student.findFirst.mockResolvedValue({ id: 'student-b', userId: null });
@@ -163,8 +169,26 @@ describe('StudentRecordService', () => {
     const report = await service.record('student-a', hod);
     expect(report.fees).toBeNull();
     expect(database.invoice.findMany).not.toHaveBeenCalled();
-    // The HOD's lookup is limited to students enrolled in their department.
+    // The HOD's lookup is limited to students enrolled in their department...
     expect(database.student.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'student-a', collegeId: 'college-a', enrollments: { some: { section: { semester: { course: { departmentId: 'department-a' } } } } } } }));
+    // ...and so is every record query, in case the student also has records in another department.
+    const inDepartment = { semester: { course: { departmentId: 'department-a' } } };
+    const whereOf = (fn: jest.Mock) => (fn.mock.calls[0]?.[0] as { where: unknown }).where;
+    expect(whereOf(database.attendanceRecord.findMany)).toEqual({ collegeId: 'college-a', studentId: 'student-a', attendance: { class: { section: inDepartment } } });
+    expect(whereOf(database.assignment.findMany)).toEqual({ collegeId: 'college-a', class: { section: { enrollments: { some: { collegeId: 'college-a', studentId: 'student-a', status: 'ACTIVE' } }, ...inDepartment } } });
+    expect(whereOf(database.result.findMany)).toEqual({ collegeId: 'college-a', studentId: 'student-a', publishedAt: { not: null }, exam: { examSubjects: { some: inDepartment } } });
+  });
+
+  it('counts an overdue draft as missed coursework, and lists undated assignments last', async () => {
+    const database = createRecordDatabase();
+    database.assignment.findMany.mockResolvedValue([
+      { id: 'a-4', title: 'Draft only', dueAt: new Date('2026-01-03'), maxMarks: '10', class: { subject: { code: 'CS302', name: 'DBMS' } }, submissions: [{ status: 'DRAFT', submittedAt: null, marksAwarded: null }] },
+    ]);
+    const service = new StudentRecordService(database as never, new StudentsService(database as never));
+    const report = await service.record('student-a', admin);
+    expect(report.coursework).toMatchObject({ assigned: 1, submitted: 0, missing: 1 });
+    expect(report.coursework.items[0]?.status).toBe('MISSING');
+    expect(database.assignment.findMany).toHaveBeenCalledWith(expect.objectContaining({ orderBy: [{ dueAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }] }));
   });
 
   it('is not available to faculty', async () => {

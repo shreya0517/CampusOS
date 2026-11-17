@@ -32,14 +32,18 @@ export class StudentRecordService {
     // Reuses the directory's scoping: Admin reaches every student in the college, an HOD only their department's.
     const student = await this.students.get(id, context);
     const collegeId = context.collegeId;
+    // A student can have records in more than one department; an HOD sees only those from their own.
+    const hodDepartment = isAdmin ? null : context.departmentId;
+    if (!isAdmin && !hodDepartment) denied();
+    const inDepartment = hodDepartment ? { semester: { course: { departmentId: hodDepartment } } } : {};
 
     const [attendanceRecords, assignments, results, invoices] = await Promise.all([
       this.database.attendanceRecord.findMany({
-        where: { collegeId, studentId: id },
+        where: { collegeId, studentId: id, ...(hodDepartment ? { attendance: { class: { section: inDepartment } } } : {}) },
         select: { status: true, attendance: { select: { class: { select: { subject: { select: { id: true, code: true, name: true } } } } } } },
       }),
       this.database.assignment.findMany({
-        where: { collegeId, class: { section: { enrollments: { some: { collegeId, studentId: id, status: 'ACTIVE' } } } } },
+        where: { collegeId, class: { section: { enrollments: { some: { collegeId, studentId: id, status: 'ACTIVE' } }, ...inDepartment } } },
         select: {
           id: true,
           title: true,
@@ -48,11 +52,12 @@ export class StudentRecordService {
           class: { select: { subject: { select: { code: true, name: true } } } },
           submissions: { where: { collegeId, studentId: id }, select: { status: true, submittedAt: true, marksAwarded: true } },
         },
-        orderBy: [{ dueAt: 'desc' }, { createdAt: 'desc' }],
+        // Undated assignments go last, so they can't push every dated one out of the limit.
+        orderBy: [{ dueAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
         take: RECORD_COURSEWORK_LIMIT,
       }),
       this.database.result.findMany({
-        where: { collegeId, studentId: id, publishedAt: { not: null } },
+        where: { collegeId, studentId: id, publishedAt: { not: null }, ...(hodDepartment ? { exam: { examSubjects: { some: inDepartment } } } : {}) },
         select: { id: true, totalMarks: true, percentage: true, status: true, publishedAt: true, exam: { select: { id: true, name: true } } },
         orderBy: { publishedAt: 'desc' },
       }),
@@ -86,7 +91,8 @@ export class StudentRecordService {
 
     const now = new Date();
     const coursework = assignments.map((assignment) => {
-      const submission = assignment.submissions[0];
+      // A saved draft hasn't been handed in, so it counts like no submission.
+      const submission = assignment.submissions[0]?.status === 'DRAFT' ? undefined : assignment.submissions[0];
       const missing = !submission && assignment.dueAt !== null && assignment.dueAt < now;
       return {
         id: assignment.id,
