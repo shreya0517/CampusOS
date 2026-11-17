@@ -9,6 +9,7 @@ const inDepartment = (departmentId: string) => ({ section: { semester: { course:
 
 function createDatabase() {
   return {
+    college: { findUnique: jest.fn().mockResolvedValue({ timezone: 'Asia/Kolkata' }) },
     student: {
       count: jest.fn().mockResolvedValue(3),
       findMany: jest.fn().mockResolvedValue([{ id: 'stu-1', firstName: 'Aarav', lastName: 'Mehta', studentCode: 'S-1', createdAt: new Date('2026-11-10T09:00:00Z') }]),
@@ -118,11 +119,16 @@ describe('InstitutionOverviewService', () => {
     expect(report.upcomingExams).toBe(1);
     expect(report.fees).toEqual({ collected: 15000, outstanding: 70000, openInvoices: 2, overdueInvoices: 1 });
     // Every query stays inside the admin's college.
-    for (const model of Object.values(database)) {
+    expect(database.college.findUnique).toHaveBeenCalledWith({ where: { id: 'col-a' }, select: { timezone: true } });
+    const { college: _college, ...tenantModels } = database;
+    for (const model of Object.values(tenantModels)) {
       for (const fn of Object.values(model)) {
         for (const [args] of (fn as jest.Mock).mock.calls) expect((args as { where: { collegeId: string } }).where.collegeId).toBe('col-a');
       }
     }
+    // The attendance window stops at today, so future-dated sessions don't count.
+    const windowQuery = database.attendance.findMany.mock.calls.find(([args]) => !(args as { take?: number }).take)?.[0] as { where: { heldOn: { gte: Date; lte: Date } } };
+    expect(windowQuery.where.heldOn.lte).toEqual(todayAsStoredDate('Asia/Kolkata'));
   });
 
   it('gives each department its HOD, people, attendance and open tasks', async () => {
@@ -147,7 +153,11 @@ describe('InstitutionOverviewService', () => {
     expect(report.recentActivity[0]).toMatchObject({ detail: 'DBMS · by Dr. Priya Sharma', href: '/dashboard/exams/exam-1/subjects/es-1/marks' });
   });
 
-  it('reads today as the local calendar date', () => {
-    expect(todayAsStoredDate(new Date(2026, 10, 18, 23, 30)).toISOString()).toBe('2026-11-18T00:00:00.000Z');
+  it("reads today in the college's timezone", () => {
+    // 20:00 UTC on 18 Nov is already 19 Nov in India, still 18 Nov in New York.
+    const now = new Date('2026-11-18T20:00:00Z');
+    expect(todayAsStoredDate('Asia/Kolkata', now).toISOString()).toBe('2026-11-19T00:00:00.000Z');
+    expect(todayAsStoredDate('America/New_York', now).toISOString()).toBe('2026-11-18T00:00:00.000Z');
+    expect(() => todayAsStoredDate('Not/AZone', now)).not.toThrow();
   });
 });

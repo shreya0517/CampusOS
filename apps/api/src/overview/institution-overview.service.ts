@@ -27,8 +27,17 @@ const add = (tally: Tally, status: AttendanceStatus, amount: number): void => {
 
 export type ActivityItem = { type: string; title: string; detail: string; at: string; href: string | null };
 
-/** The server's calendar date as stored in @db.Date columns (midnight UTC of the local date). */
-export const todayAsStoredDate = (now = new Date()): Date => new Date(now.toLocaleDateString('en-CA'));
+/**
+ * Today's calendar date in the college's timezone, as stored in @db.Date columns (midnight UTC of that date). An unknown
+ * timezone falls back to the server's own date rather than failing the dashboard.
+ */
+export const todayAsStoredDate = (timeZone?: string | null, now = new Date()): Date => {
+  try {
+    return new Date(now.toLocaleDateString('en-CA', timeZone ? { timeZone } : undefined));
+  } catch {
+    return new Date(now.toLocaleDateString('en-CA'));
+  }
+};
 
 const fullName = (person: { firstName: string; lastName: string }): string => `${person.firstName} ${person.lastName}`.trim();
 const money = (value: unknown): number => Number(value ?? 0);
@@ -44,7 +53,8 @@ export class InstitutionOverviewService {
   async overview(context: AuthorizationContext) {
     if (!context.roles.includes('ADMIN')) denied();
     const collegeId = context.collegeId;
-    const today = todayAsStoredDate();
+    const college = await this.database.college.findUnique({ where: { id: collegeId }, select: { timezone: true } });
+    const today = todayAsStoredDate(college?.timezone);
     const since = new Date(today.getTime() - (OVERVIEW_WINDOW_DAYS - 1) * 86_400_000);
 
     const [
@@ -76,9 +86,10 @@ export class InstitutionOverviewService {
         where: { collegeId, status: { in: [...OPEN_INVOICE_STATUSES] } },
         select: { amountDue: true, dueOn: true, payments: { where: { status: 'COMPLETED' }, select: { amount: true } } },
       }),
-      this.database.attendanceRecord.groupBy({ by: ['attendanceId', 'status'], where: { collegeId, attendance: { heldOn: { gte: since } } }, _count: { _all: true } }),
+      // The window ends today: sessions recorded with a future date don't count yet.
+      this.database.attendanceRecord.groupBy({ by: ['attendanceId', 'status'], where: { collegeId, attendance: { heldOn: { gte: since, lte: today } } }, _count: { _all: true } }),
       this.database.attendance.findMany({
-        where: { collegeId, heldOn: { gte: since } },
+        where: { collegeId, heldOn: { gte: since, lte: today } },
         select: { id: true, class: { select: { section: { select: { semester: { select: { course: { select: { departmentId: true } } } } } } } } },
       }),
       this.database.enrollment.findMany({

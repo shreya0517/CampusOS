@@ -161,7 +161,7 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 
 - GET /api/v1/overview/institution: ADMIN only (HOD, FACULTY and STUDENT get 403). Everything comes from stored records in the admin's college:
   - `totals`: students, faculty and departments.
-  - `attendance.today` and `attendance.window` (the last `windowDays`, 30): present, absent, late, excused, `percentage` (late counts as attended, excused is left out) and `belowThreshold` (under 75%).
+  - `attendance.today` (today in the college's timezone) and `attendance.window` (the last `windowDays`, 30, ending today; future-dated sessions are left out): present, absent, late, excused, `percentage` (late counts as attended, excused is left out) and `belowThreshold` (under 75%).
   - `tasks`: task assignments by status, plus `overdue` (past the deadline and not approved).
   - `pendingVisitors` and `upcomingExams` (draft or scheduled, starting today or later).
   - `fees`: `collected` (completed payments), `outstanding` (unpaid balance of issued, partially paid and overdue invoices), `openInvoices` and `overdueInvoices`.
