@@ -6,8 +6,7 @@ import Link from 'next/link';
 import { useAuth } from '@/components/auth-provider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { listStudents } from '@/lib/student-api';
-import { listFaculty, listDepartments, getMyFaculty, type Faculty } from '@/lib/faculty-api';
+import { listFaculty, getMyFaculty, type Faculty } from '@/lib/faculty-api';
 import {
   getMyAssignmentStats,
   listTasks,
@@ -28,6 +27,7 @@ import { Table, TableCell, TableHead } from '@/components/ui/table';
 import { EmptyState, Skeleton } from '@/components/feedback/states';
 import { StudentDashboardView } from '@/components/dashboard/student-dashboard-view';
 import { MarksReviewQueue } from '@/components/dashboard/marks-review-queue';
+import { getInstitutionOverview, type AttendanceSummary, type InstitutionOverview } from '@/lib/overview-api';
 import { useTaskEvents, TASK_EVENTS } from '@/lib/use-socket';
 import { NavIcon } from '@/lib/navigation';
 
@@ -156,86 +156,279 @@ function formatTime(dateOrStr: string): string {
 
 
 // ─── Admin Dashboard ──────────────────────────────────────────────────────────
-function AdminDashboard() {
-  const [stats, setStats] = useState<{ students: number; faculty: number; departments: number } | null>(null);
-  const [taskStats, setTaskStats] = useState<TaskStats | null>(null);
-  const [pendingVisitors, setPendingVisitors] = useState(0);
+const ACTIVITY_ICON: Record<string, { icon: string; tone: Tone }> = {
+  STUDENT_ADDED: { icon: 'students', tone: 'blue' },
+  FACULTY_ADDED: { icon: 'faculty', tone: 'violet' },
+  ATTENDANCE_MARKED: { icon: 'attendance', tone: 'emerald' },
+  ATTENDANCE_CORRECTED: { icon: 'attendance', tone: 'amber' },
+  TASK_SUBMITTED: { icon: 'tasks', tone: 'sky' },
+  VISITOR_REGISTERED: { icon: 'visitors', tone: 'amber' },
+  MARKS_SUBMITTED: { icon: 'exams', tone: 'blue' },
+  MARKS_APPROVED: { icon: 'exams', tone: 'emerald' },
+  MARKS_RETURNED: { icon: 'exams', tone: 'rose' },
+};
 
-  const loadTaskStats = useCallback(() => {
-    getMyAssignmentStats().then(setTaskStats).catch(() => undefined);
+const rupees = (amount: number): string => `₹${Math.round(amount).toLocaleString('en-IN')}`;
+
+function timeAgo(iso: string): string {
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
+  // A timestamp ahead of this clock (clock skew) shows its date rather than a misleading "just now".
+  if (minutes < 0) return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days} day${days === 1 ? '' : 's'} ago`;
+  return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
+
+function AttendanceBar({ summary }: { summary: AttendanceSummary }) {
+  if (summary.percentage === null) return <span className="text-xs text-[hsl(var(--muted-foreground))]">No sessions</span>;
+  const color = summary.belowThreshold ? 'bg-rose-500' : summary.percentage < 85 ? 'bg-amber-500' : 'bg-emerald-500';
+  return (
+    <div className="flex min-w-[9rem] items-center gap-2">
+      <div className="h-2 flex-1 overflow-hidden rounded-full bg-[hsl(var(--muted))]">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(100, summary.percentage)}%` }} />
+      </div>
+      <span className={`w-12 text-right text-sm font-semibold tabular-nums ${summary.belowThreshold ? 'text-rose-600 dark:text-rose-400' : ''}`}>
+        {summary.percentage}%
+      </span>
+    </div>
+  );
+}
+
+function AdminDashboard() {
+  const [overview, setOverview] = useState<InstitutionOverview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    getInstitutionOverview()
+      .then((report) => {
+        setOverview(report);
+        setError(null);
+      })
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'The overview could not be loaded.'));
   }, []);
 
   useEffect(() => {
-    const p = new URLSearchParams({ page: '1', pageSize: '1' });
-    Promise.all([
-      listStudents(p),
-      listFaculty(p),
-      listDepartments(p),
-      getMyAssignmentStats(),
-    ]).then(([s, f, d, ts]) => {
-      setStats({ students: s.total, faculty: f.total, departments: d.total });
-      setTaskStats(ts);
-    }).catch(() => undefined);
-
-    // Visitor pending count
-    import('@/lib/visitors-api').then(({ listVisitors }) => {
-      listVisitors(new URLSearchParams({ status: 'PENDING', page: '1', pageSize: '1' }))
-        .then((r) => setPendingVisitors(r.total))
-        .catch(() => undefined);
-    });
-  }, []);
+    load();
+  }, [load]);
 
   useTaskEvents(
-    [
-      TASK_EVENTS.CREATED,
-      TASK_EVENTS.ASSIGNED,
-      TASK_EVENTS.STARTED,
-      TASK_EVENTS.SUBMITTED,
-      TASK_EVENTS.REVIEWED,
-      TASK_EVENTS.UPDATED,
-    ],
-    () => {
-      loadTaskStats();
-    },
+    [TASK_EVENTS.CREATED, TASK_EVENTS.ASSIGNED, TASK_EVENTS.STARTED, TASK_EVENTS.SUBMITTED, TASK_EVENTS.REVIEWED, TASK_EVENTS.UPDATED],
+    () => load(),
   );
+
+  if (error) {
+    return (
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 text-sm">
+          <span className="text-[hsl(var(--destructive))]">{error}</span>
+          <Button variant="outline" onClick={load}>
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!overview) {
+    return (
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 8 }, (_, index) => (
+          <Skeleton key={index} className="h-28 w-full" />
+        ))}
+      </div>
+    );
+  }
+
+  const { totals, attendance, tasks, fees } = overview;
+  const openTasks = tasks.pending + tasks.inProgress + tasks.rework;
 
   return (
     <div className="grid gap-8">
-      {/* Stat row */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total Students" value={stats?.students ?? '…'} href="/dashboard/students" icon="students" tone="blue" />
-        <StatCard label="Total Faculty" value={stats?.faculty ?? '…'} href="/dashboard/faculty" icon="faculty" tone="violet" />
-        <StatCard label="Departments" value={stats?.departments ?? '…'} href="/dashboard/departments" icon="department" tone="emerald" />
+      {/* B. Institutional statistics */}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Total Students" value={totals.students} href="/dashboard/students" icon="students" tone="blue" />
+        <StatCard label="Total Faculty" value={totals.faculty} href="/dashboard/faculty" icon="faculty" tone="violet" />
+        <StatCard label="Departments" value={totals.departments} href="/dashboard/departments" icon="department" tone="emerald" />
         <StatCard
-          label="Pending Visitors"
-          value={pendingVisitors}
-          sub="Awaiting approval"
-          href="/dashboard/visitors"
-          icon="visitors"
-          tone="amber"
+          label="Today's Attendance"
+          value={attendance.today.percentage === null ? '—' : `${attendance.today.percentage}%`}
+          sub={
+            attendance.today.counted === 0
+              ? `Not marked yet today · ${overview.windowDays}-day average ${attendance.window.percentage ?? '—'}%`
+              : `${attendance.today.attended} of ${attendance.today.counted} present · ${overview.windowDays}-day average ${attendance.window.percentage ?? '—'}%`
+          }
+          href="/dashboard/attendance"
+          icon="attendance"
+          tone={attendance.today.belowThreshold ? 'rose' : 'sky'}
+        />
+        <StatCard
+          label="Pending Tasks"
+          value={openTasks}
+          sub={`${tasks.submitted} awaiting review · ${tasks.overdue} overdue`}
+          href="/dashboard/tasks"
+          icon="tasks"
+          tone={tasks.overdue > 0 ? 'rose' : 'blue'}
+        />
+        <StatCard label="Pending Visitors" value={overview.pendingVisitors} sub="Awaiting approval" href="/dashboard/visitors" icon="visitors" tone="amber" />
+        <StatCard label="Upcoming Exams" value={overview.upcomingExams} sub="Draft or scheduled, from today" href="/dashboard/exams" icon="exams" tone="violet" />
+        <StatCard
+          label="Fee Collection"
+          value={rupees(fees.collected)}
+          sub={`${rupees(fees.outstanding)} outstanding on ${fees.openInvoices} invoice${fees.openInvoices === 1 ? '' : 's'}${fees.overdueInvoices ? ` · ${fees.overdueInvoices} overdue` : ''}`}
+          href="/dashboard/fees"
+          icon="fees"
+          tone="emerald"
         />
       </div>
 
       <MarksReviewQueue />
 
-      {/* Visitor notification banner */}
-      {pendingVisitors > 0 && (
+      {overview.pendingVisitors > 0 && (
         <Link href="/dashboard/visitors">
           <div className="flex items-center gap-3 rounded-[var(--radius)] border border-amber-300 bg-amber-50 px-4 py-3 dark:border-amber-700 dark:bg-amber-950">
-            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-500 text-xs font-bold text-white">
-              {pendingVisitors}
-            </span>
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-500 text-xs font-bold text-white">{overview.pendingVisitors}</span>
             <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-              {pendingVisitors} visitor request{pendingVisitors !== 1 ? 's' : ''} pending your approval
+              {overview.pendingVisitors} visitor request{overview.pendingVisitors !== 1 ? 's' : ''} pending approval
             </p>
             <span className="ml-auto text-sm font-semibold text-amber-700 dark:text-amber-300">Review →</span>
           </div>
         </Link>
       )}
 
-      {/* Three admin sections */}
+      <div className="grid gap-6 2xl:grid-cols-3">
+        {/* C. Department overview */}
+        <Card className="self-start 2xl:col-span-2">
+          <CardHeader className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <CardTitle>Department overview</CardTitle>
+              <CardDescription>Attendance covers the last {overview.windowDays} days; open tasks are pending, in progress or returned for rework.</CardDescription>
+            </div>
+            <Link href="/dashboard/departments" className="text-sm font-semibold text-[hsl(var(--primary))] hover:underline">
+              Manage departments →
+            </Link>
+          </CardHeader>
+          <CardContent className="p-0">
+            {overview.departments.length === 0 ? (
+              <div className="p-5">
+                <EmptyState title="No departments yet" description="Departments you create will appear here with their HOD, faculty and students." />
+              </div>
+            ) : (
+              <Table>
+                <thead>
+                  <tr>
+                    <TableHead>Department</TableHead>
+                    <TableHead>HOD</TableHead>
+                    <TableHead className="text-right">Faculty</TableHead>
+                    <TableHead className="text-right">Students</TableHead>
+                    <TableHead>Attendance</TableHead>
+                    <TableHead className="text-right">Open tasks</TableHead>
+                  </tr>
+                </thead>
+                <tbody>
+                  {overview.departments.map((department) => (
+                    <tr key={department.id}>
+                      <TableCell>
+                        <p className="font-semibold">{department.name}</p>
+                        <p className="text-xs text-[hsl(var(--muted-foreground))]">{department.code}</p>
+                      </TableCell>
+                      <TableCell>
+                        {department.hod ? (
+                          <Link href={`/dashboard/faculty/${department.hod.id}`} className="hover:underline">
+                            {department.hod.name}
+                          </Link>
+                        ) : (
+                          <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">Not assigned</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{department.faculty}</TableCell>
+                      <TableCell className="text-right tabular-nums">{department.students}</TableCell>
+                      <TableCell>
+                        <AttendanceBar summary={department.attendance} />
+                      </TableCell>
+                      <TableCell className={`text-right tabular-nums ${department.openTasks > 0 ? 'font-semibold' : ''}`}>{department.openTasks}</TableCell>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* E. Recent activity */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Recent activity</CardTitle>
+            <CardDescription>The latest events across the college.</CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            {overview.recentActivity.length === 0 ? (
+              <p className="p-5 text-sm text-[hsl(var(--muted-foreground))]">Nothing has happened yet.</p>
+            ) : (
+              <ul className="divide-y">
+                {overview.recentActivity.map((item, index) => {
+                  const look = ACTIVITY_ICON[item.type] ?? { icon: 'dashboard', tone: 'blue' as Tone };
+                  const body = (
+                    <div className="flex gap-3 px-5 py-3">
+                      <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${TONE_CLASSES[look.tone]}`} aria-hidden="true">
+                        <NavIcon name={look.icon} className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold">{item.title}</p>
+                        <p className="truncate text-xs text-[hsl(var(--muted-foreground))]" title={item.detail}>
+                          {item.detail}
+                        </p>
+                      </div>
+                      <time className="shrink-0 text-xs text-[hsl(var(--muted-foreground))]" dateTime={item.at} title={new Date(item.at).toLocaleString('en-IN')}>
+                        {timeAgo(item.at)}
+                      </time>
+                    </div>
+                  );
+                  return (
+                    <li key={`${item.type}-${item.at}-${index}`}>
+                      {item.href ? (
+                        <Link href={item.href} className="block transition-colors hover:bg-[hsl(var(--muted))]/50">
+                          {body}
+                        </Link>
+                      ) : (
+                        body
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* D. Task overview */}
       <div className="grid gap-3">
-        <SectionHeading title="Administration" description="Where the college's day-to-day management happens." />
+        <SectionHeading
+          title="Task overview"
+          description="Every task assignment in the college, by status."
+          action={
+            <Link href="/dashboard/tasks/new">
+              <Button variant="outline">+ Assign a task</Button>
+            </Link>
+          }
+        />
+        <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-6">
+          <StatCard label="Pending" value={tasks.pending} href="/dashboard/tasks" />
+          <StatCard label="In Progress" value={tasks.inProgress} href="/dashboard/tasks" />
+          <StatCard label="Submitted" value={tasks.submitted} sub="Awaiting review" href="/dashboard/tasks" />
+          <StatCard label="Approved" value={tasks.approved} href="/dashboard/tasks" />
+          <StatCard label="Needs Rework" value={tasks.rework} href="/dashboard/tasks" />
+          <StatCard label="Overdue" value={tasks.overdue} sub="Past deadline, not approved" href="/dashboard/tasks" />
+        </div>
+      </div>
+
+      {/* Administration quick links */}
+      <div className="grid gap-3">
+        <SectionHeading title="Reports" description="Detailed views behind these figures." />
         <div className="grid gap-4 md:grid-cols-3">
           <NavCard
             title="Institutional Overview"
@@ -260,20 +453,6 @@ function AdminDashboard() {
           />
         </div>
       </div>
-
-      {/* Task summary */}
-      {taskStats && (
-        <div className="grid gap-3">
-          <SectionHeading title="Task progress" description="Tasks you have assigned, by status." />
-          <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
-            <StatCard label="Pending Tasks" value={taskStats.pending} href="/dashboard/tasks" />
-            <StatCard label="In Progress" value={taskStats.inProgress} href="/dashboard/tasks" />
-            <StatCard label="Submitted" value={taskStats.submitted} sub="Awaiting review" href="/dashboard/tasks" />
-            <StatCard label="Approved" value={taskStats.approved} href="/dashboard/tasks" />
-            <StatCard label="Needs Rework" value={taskStats.rework} href="/dashboard/tasks" />
-          </div>
-        </div>
-      )}
     </div>
   );
 }
