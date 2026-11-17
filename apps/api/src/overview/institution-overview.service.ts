@@ -1,8 +1,8 @@
 import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
-import type { AttendanceStatus } from '@prisma/client';
 import { DatabaseService } from '../database.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
-import { summarize } from '../attendance/attendance.service';
+import { count as add, emptyTally, summarize } from '../attendance/attendance.service';
+import type { Tally } from '../attendance/attendance.service';
 
 /** Department attendance and the attendance trend cover this many recent days. */
 export const OVERVIEW_WINDOW_DAYS = 30;
@@ -14,15 +14,6 @@ const OPEN_INVOICE_STATUSES = ['ISSUED', 'PARTIALLY_PAID', 'OVERDUE'] as const;
 
 const denied = (): never => {
   throw new ForbiddenException({ code: 'FORBIDDEN', message: 'You are not authorized to access this resource.' });
-};
-
-type Tally = { present: number; absent: number; late: number; excused: number };
-const emptyTally = (): Tally => ({ present: 0, absent: 0, late: 0, excused: 0 });
-const add = (tally: Tally, status: AttendanceStatus, amount: number): void => {
-  if (status === 'PRESENT') tally.present += amount;
-  else if (status === 'ABSENT') tally.absent += amount;
-  else if (status === 'LATE') tally.late += amount;
-  else tally.excused += amount;
 };
 
 export type ActivityItem = { type: string; title: string; detail: string; at: string; href: string | null };
