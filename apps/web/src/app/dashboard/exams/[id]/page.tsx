@@ -155,7 +155,7 @@ export default function ExamDetailPage() {
         <div className="mt-2 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-semibold">{exam.name}</h1>
+              <h1 className="text-2xl font-bold tracking-tight">{exam.name}</h1>
               <span className={`rounded-full border px-3 py-0.5 text-xs font-bold ${STATUS_COLORS[exam.status]}`}>
                 {exam.status}
               </span>

@@ -84,7 +84,7 @@ export default function MyProfilePage() {
   return (
     <div className="grid gap-6">
       <div>
-        <h1 className="text-3xl font-semibold">My Profile</h1>
+        <h1 className="text-2xl font-bold tracking-tight">My Profile</h1>
         <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">Your personal and academic details as recorded by the college.</p>
       </div>
 

@@ -49,7 +49,7 @@ export default function AttendancePage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Attendance</p>
-          <h1 className="mt-2 text-3xl font-semibold">Attendance management</h1>
+          <h1 className="mt-2 text-2xl font-bold tracking-tight">Attendance management</h1>
           <p className="mt-2 text-[hsl(var(--muted-foreground))]">Mark and review attendance sessions for classes.</p>
         </div>
         {canMarkAttendance && (

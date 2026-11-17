@@ -133,7 +133,7 @@ export default function FeesPage() {
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Finance</p>
-          <h1 className="mt-1 text-3xl font-semibold">Fees & Online Payments</h1>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight">Fees & Online Payments</h1>
           <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
             {isStudent
               ? 'Your invoices, payments and receipts.'

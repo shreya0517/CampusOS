@@ -182,7 +182,7 @@ export default function TaskDetailPage() {
           <button onClick={() => router.back()} className="mb-2 text-sm text-[hsl(var(--muted-foreground))] hover:underline">
             ← Back to Tasks
           </button>
-          <h1 className="text-3xl font-semibold">{task.title}</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{task.title}</h1>
           <div className="mt-2 flex flex-wrap gap-2">
             <Badge value={task.priority} map={PRIORITY_BADGE} />
             <Badge value={task.status} map={STATUS_BADGE} />

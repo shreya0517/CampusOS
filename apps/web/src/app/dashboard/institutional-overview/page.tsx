@@ -60,7 +60,7 @@ export default function InstitutionalOverviewPage() {
       <div className="grid gap-6">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Admin</p>
-          <h1 className="mt-2 text-3xl font-semibold">Institutional Overview</h1>
+          <h1 className="mt-2 text-2xl font-bold tracking-tight">Institutional Overview</h1>
         </div>
         <p className="text-[hsl(var(--muted-foreground))]">Loading…</p>
       </div>
@@ -72,7 +72,7 @@ export default function InstitutionalOverviewPage() {
       <div className="grid gap-6">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Admin</p>
-          <h1 className="mt-2 text-3xl font-semibold">Institutional Overview</h1>
+          <h1 className="mt-2 text-2xl font-bold tracking-tight">Institutional Overview</h1>
         </div>
         <Card className="border-destructive">
           <CardContent className="pt-5">
@@ -87,7 +87,7 @@ export default function InstitutionalOverviewPage() {
     <div className="grid gap-8">
       <div>
         <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Admin</p>
-        <h1 className="mt-2 text-3xl font-semibold">Institutional Overview</h1>
+        <h1 className="mt-2 text-2xl font-bold tracking-tight">Institutional Overview</h1>
         <p className="mt-2 max-w-2xl text-[hsl(var(--muted-foreground))]">
           A snapshot of students, faculty, and departments across the college.
         </p>

@@ -88,7 +88,7 @@ function StudentAssignments() {
   return (
     <div className="grid gap-6">
       <div>
-        <h1 className="text-3xl font-semibold">My Assignments</h1>
+        <h1 className="text-2xl font-bold tracking-tight">My Assignments</h1>
         <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">Coursework from your subjects and where each one stands.</p>
       </div>
 
@@ -240,7 +240,7 @@ function StaffAssignments({ primaryRole }: { primaryRole: string }) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Assignments</p>
-          <h1 className="mt-2 text-3xl font-semibold">Assignments & Submissions</h1>
+          <h1 className="mt-2 text-2xl font-bold tracking-tight">Assignments & Submissions</h1>
           <p className="mt-2 text-[hsl(var(--muted-foreground))]">Manage course assignments, view student submissions, and grade work.</p>
         </div>
         {isStaff && (

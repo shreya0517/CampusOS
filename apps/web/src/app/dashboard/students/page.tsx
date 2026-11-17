@@ -64,7 +64,7 @@ export default function StudentsPage() {
     <div className="grid gap-6">
       <div>
         <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Students</p>
-        <h1 className="mt-2 text-3xl font-semibold">Student Management</h1>
+        <h1 className="mt-2 text-2xl font-bold tracking-tight">Student Management</h1>
         <p className="mt-2 text-[hsl(var(--muted-foreground))]">Live records are scoped by the authenticated CampusOS account.</p>
       </div>
       <Card>

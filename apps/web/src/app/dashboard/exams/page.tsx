@@ -60,7 +60,7 @@ export default function ExamsPage() {
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Academics</p>
-          <h1 className="mt-1 text-3xl font-semibold">Exams & Results</h1>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight">Exams & Results</h1>
           <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
             {isStudent
               ? 'Your upcoming examinations and published results.'

@@ -78,9 +78,9 @@ function StatCard({
   valueColor?: string;
 }) {
   const content = (
-    <Card className="transition-colors hover:border-[hsl(var(--primary))]/50">
-      <CardContent className="pt-5">
-        <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))]">{label}</p>
+    <Card className="h-full transition hover:border-[hsl(var(--primary))]/40 hover:shadow-md">
+      <CardContent>
+        <p className="text-sm font-medium text-[hsl(var(--muted-foreground))]">{label}</p>
         <p className={`mt-2 text-2xl font-bold tracking-tight ${valueColor ?? ''}`}>{value}</p>
         {sub && <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{sub}</p>}
       </CardContent>
@@ -89,7 +89,7 @@ function StatCard({
 
   if (href) {
     return (
-      <Link href={href} className="block">
+      <Link href={href} className="block h-full">
         {content}
       </Link>
     );
@@ -263,15 +263,15 @@ export function StudentDashboardView() {
   return (
     <div className="grid gap-8">
       {/* ─── A. Welcome Section ────────────────────────────────────────────── */}
-      <Card className="border-[hsl(var(--primary))]/30 bg-[hsl(var(--primary))]/5">
-        <CardContent className="flex flex-wrap items-center justify-between gap-4 pt-5">
+      <Card className="border-[hsl(var(--primary))]/20 bg-gradient-to-r from-[hsl(var(--card))] from-50% to-[hsl(var(--sidebar-active))]">
+        <CardContent className="flex flex-wrap items-center justify-between gap-4 py-6">
           <div className="space-y-1">
             <p className="text-xs font-semibold uppercase tracking-widest text-[hsl(var(--primary))]">
               {department?.name ?? 'Department'} · Student Portal
             </p>
-            <p className="text-2xl font-semibold">
+            <h1 className="text-2xl font-bold tracking-tight">
               {greeting}, {studentDisplayName}
-            </p>
+            </h1>
             <p className="text-sm text-[hsl(var(--muted-foreground))]">
               {todayDateString} · Enrolled in{' '}
               <span className="font-semibold text-[hsl(var(--foreground))]">

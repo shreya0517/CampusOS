@@ -108,7 +108,7 @@ export default function TimetablePage() {
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Academics</p>
-          <h1 className="mt-1 text-3xl font-semibold">Class Timetable</h1>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight">Class Timetable</h1>
           <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
             Schedule and view weekly class sessions, rooms, faculty assignments, and time slots.
           </p>

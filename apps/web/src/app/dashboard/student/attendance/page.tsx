@@ -138,7 +138,7 @@ export default function MyAttendancePage() {
   return (
     <div className="grid gap-6">
       <div>
-        <h1 className="text-3xl font-semibold">My Attendance</h1>
+        <h1 className="text-2xl font-bold tracking-tight">My Attendance</h1>
         <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
           Attendance recorded by your faculty. Late counts as attended; excused classes are not counted against you. The minimum is {threshold}% in every subject.
         </p>

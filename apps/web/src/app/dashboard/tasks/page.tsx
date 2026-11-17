@@ -81,7 +81,7 @@ export default function TasksPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Work</p>
-          <h1 className="mt-2 text-3xl font-semibold">Task Management</h1>
+          <h1 className="mt-2 text-2xl font-bold tracking-tight">Task Management</h1>
           <p className="mt-2 text-[hsl(var(--muted-foreground))]">
             {isManager ? 'Create and manage tasks across your team.' : 'View and update your assigned tasks.'}
           </p>

@@ -47,7 +47,7 @@ export default function MyResultsPage() {
         <Link href="/dashboard/exams" className="text-sm font-semibold text-[hsl(var(--primary))] hover:underline">
           &larr; Back to Exams
         </Link>
-        <h1 className="mt-2 text-3xl font-semibold">My Academic Performance & Results</h1>
+        <h1 className="mt-2 text-2xl font-bold tracking-tight">My Academic Performance & Results</h1>
         <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
           Your official academic record, exam report cards, and subject paper marks.
         </p>

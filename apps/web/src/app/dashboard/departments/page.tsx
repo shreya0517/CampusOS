@@ -41,7 +41,7 @@ export default function DepartmentsPage() {
     <div className="grid gap-6">
       <div>
         <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Departments</p>
-        <h1 className="mt-2 text-3xl font-semibold">Department Management</h1>
+        <h1 className="mt-2 text-2xl font-bold tracking-tight">Department Management</h1>
       </div>
 
       {(isAdmin || (editing && canEdit)) && (

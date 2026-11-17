@@ -137,7 +137,7 @@ export default function HodOverviewPage() {
           <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">
             {deptName ?? 'Department'} · HOD
           </p>
-          <h1 className="mt-2 text-3xl font-semibold">Department Overview</h1>
+          <h1 className="mt-2 text-2xl font-bold tracking-tight">Department Overview</h1>
           <p className="mt-2 text-[hsl(var(--muted-foreground))]">
             Manage faculty tasks, review submissions, and approve visitor requests.
           </p>

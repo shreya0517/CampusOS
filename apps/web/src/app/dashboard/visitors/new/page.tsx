@@ -57,7 +57,7 @@ export default function NewVisitorPage() {
     <div className="grid gap-6">
       <div>
         <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Visitors</p>
-        <h1 className="mt-2 text-3xl font-semibold">Register Visitor</h1>
+        <h1 className="mt-2 text-2xl font-bold tracking-tight">Register Visitor</h1>
         <p className="mt-2 text-[hsl(var(--muted-foreground))]">
           Register a campus visitor. The request will be reviewed by admin.
         </p>

@@ -93,7 +93,7 @@ export default function AttendanceDetailPage() {
           <Link className="text-sm font-semibold text-[hsl(var(--primary))] underline underline-offset-4" href="/dashboard/attendance">
             ← Attendance
           </Link>
-          <h1 className="mt-3 text-3xl font-semibold">{session.class.subject.name}</h1>
+          <h1 className="mt-3 text-2xl font-bold tracking-tight">{session.class.subject.name}</h1>
           <p className="mt-1 text-[hsl(var(--muted-foreground))]">
             {session.class.section.semester.course.name} · Section {session.class.section.code} · {formatDate(session.heldOn)}
           </p>
