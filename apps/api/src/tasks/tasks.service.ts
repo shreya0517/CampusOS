@@ -1,7 +1,8 @@
-import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { TaskStatus } from '@prisma/client';
 import { DatabaseService } from '../database.service';
 import { EventsService } from '../events/events.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import type { TaskEventPayload } from '../events/events.types';
 import type { AuthorizationContext } from '../authorization/authorization.types';
 import type {
@@ -42,6 +43,7 @@ export class TasksService {
   constructor(
     @Inject(DatabaseService) private readonly database: DatabaseService,
     @Inject(EventsService) private readonly events: EventsService,
+    @Optional() @Inject(NotificationsService) private readonly notifications?: NotificationsService,
   ) {}
 
   private isAdmin(context: AuthorizationContext): boolean {
@@ -239,6 +241,13 @@ export class TasksService {
       context.collegeId,
       input.assigneeUserId,
     );
+    const assigned = task as { title?: string; deadline?: string | Date };
+    await this.notifications?.notify(context.collegeId, [input.assigneeUserId], {
+      category: 'TASK',
+      title: `New task: ${assigned.title ?? 'Untitled task'}`,
+      body: assigned.deadline ? `Due ${new Date(assigned.deadline).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}.` : 'A new task has been assigned to you.',
+      link: `/dashboard/tasks/${taskId}`,
+    });
 
     return assignment;
   }
@@ -311,6 +320,14 @@ export class TasksService {
       context.collegeId,
       existing!.task.departmentId,
     );
+    // The person who created the task reviews it.
+    const submitter = (updated as { assignee?: { displayName?: string } }).assignee?.displayName ?? 'The assignee';
+    await this.notifications?.notify(context.collegeId, [existing!.task.createdByUserId].filter((id) => id !== context.userId), {
+      category: 'TASK',
+      title: `Task submitted for review: ${existing!.task.title}`,
+      body: `${submitter} submitted their work.`,
+      link: `/dashboard/tasks/${existing!.task.id}`,
+    });
 
     return updated;
   }
@@ -357,6 +374,12 @@ export class TasksService {
       context.collegeId,
       existing!.assigneeUserId,
     );
+    await this.notifications?.notify(context.collegeId, [existing!.assigneeUserId], {
+      category: 'TASK',
+      title: input.decision === 'APPROVED' ? `Task approved: ${existing!.task.title}` : `Task returned for rework: ${existing!.task.title}`,
+      body: input.notes ? input.notes : input.decision === 'APPROVED' ? 'Your submission was approved.' : 'Please update your work and submit it again.',
+      link: `/dashboard/tasks/${existing!.task.id}`,
+    });
 
     return updated;
   }

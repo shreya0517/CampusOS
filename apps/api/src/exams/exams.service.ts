@@ -1,4 +1,5 @@
-import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { NotificationsService } from '../notifications/notifications.service';
 import { ExamStatus, ResultStatus } from '@prisma/client';
 import { DatabaseService } from '../database.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
@@ -26,7 +27,18 @@ const examSubjectMissing = (): never => {
 
 @Injectable()
 export class ExamsService {
-  constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
+  constructor(
+    @Inject(DatabaseService) private readonly database: DatabaseService,
+    @Optional() @Inject(NotificationsService) private readonly notifications?: NotificationsService,
+  ) {}
+
+  /** Exam, subject and department of a paper, for notifications. */
+  private async paperInfo(examSubjectId: string, collegeId: string) {
+    return this.database.examSubject.findFirst({
+      where: { id: examSubjectId, collegeId },
+      select: { id: true, examId: true, exam: { select: { name: true } }, subject: { select: { name: true } }, semester: { select: { course: { select: { departmentId: true } } } } },
+    });
+  }
 
   private async getStudentId(context: AuthorizationContext): Promise<string> {
     const student = await this.database.student.findFirst({
@@ -389,6 +401,18 @@ export class ExamsService {
       if (moved.count !== 1) throw new ConflictException({ code: 'MARKS_NOT_DRAFT', message: 'These marks have already been submitted.' });
       await tx.auditLog.create({ data: { collegeId: context.collegeId, actorId: context.userId, action: 'MARKS_SUBMITTED', entityType: 'ExamSubject', entityId: examSubjectId } });
     });
+    // Reviewers: the HOD of the paper's department, or every Admin when the department has no HOD.
+    const paper = this.notifications ? await this.paperInfo(examSubjectId, context.collegeId) : null;
+    if (this.notifications && paper) {
+      const hods = await this.notifications.hodsOf(context.collegeId, paper.semester.course.departmentId);
+      const reviewers = hods.length ? hods : await this.notifications.usersWithRoles(context.collegeId, ['ADMIN']);
+      await this.notifications.notify(context.collegeId, reviewers.filter((id) => id !== context.userId), {
+        category: 'EXAM',
+        title: `Marks submitted for review: ${paper.subject.name}`,
+        body: `${paper.exam.name} · approve them or return them for changes.`,
+        link: `/dashboard/exams/${paper.examId}/subjects/${paper.id}/marks`,
+      });
+    }
     return this.getSubjectMarks(examSubjectId, context);
   }
 
@@ -412,6 +436,21 @@ export class ExamsService {
         data: { collegeId: context.collegeId, actorId: context.userId, action: approved ? 'MARKS_APPROVED' : 'MARKS_RETURNED', entityType: 'ExamSubject', entityId: examSubjectId, metadata: input.comment ? { comment: input.comment } : undefined },
       });
     });
+    // The person who submitted the marks hears the outcome.
+    if (this.notifications) {
+      const [submission, paper] = await Promise.all([
+        this.database.auditLog.findFirst({ where: { collegeId: context.collegeId, entityType: 'ExamSubject', entityId: examSubjectId, action: 'MARKS_SUBMITTED' }, orderBy: { createdAt: 'desc' }, select: { actorId: true } }),
+        this.paperInfo(examSubjectId, context.collegeId),
+      ]);
+      if (paper) {
+        await this.notifications.notify(context.collegeId, [submission?.actorId].filter((id) => id && id !== context.userId), {
+          category: 'EXAM',
+          title: approved ? `Marks approved: ${paper.subject.name}` : `Marks returned for changes: ${paper.subject.name}`,
+          body: input.comment ? `${paper.exam.name} · ${input.comment}` : paper.exam.name,
+          link: `/dashboard/exams/${paper.examId}/subjects/${paper.id}/marks`,
+        });
+      }
+    }
     return this.getSubjectMarks(examSubjectId, context);
   }
 
@@ -591,6 +630,10 @@ export class ExamsService {
       });
     });
 
+    if (this.notifications) {
+      const students = await this.notifications.studentUsers(context.collegeId, [...studentMarksMap.keys()]);
+      await this.notifications.notify(context.collegeId, students, { category: 'EXAM', title: `Results published: ${exam.name}`, body: 'Your result is now available.', link: '/dashboard/exams/me' });
+    }
     return { success: true, processedStudents: studentMarksMap.size };
   }
 

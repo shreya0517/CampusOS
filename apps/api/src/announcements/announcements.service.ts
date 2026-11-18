@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AnnouncementAudience } from '@prisma/client';
 import { DatabaseService } from '../database.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
@@ -20,7 +21,10 @@ export const audiencesFor = (context: AuthorizationContext): AnnouncementAudienc
 
 @Injectable()
 export class AnnouncementsService {
-  constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
+  constructor(
+    @Inject(DatabaseService) private readonly database: DatabaseService,
+    @Optional() @Inject(NotificationsService) private readonly notifications?: NotificationsService,
+  ) {}
 
   /** Published, unexpired announcements in the caller's college and audience, newest first. */
   async list(query: AnnouncementListQuery, context: AuthorizationContext) {
@@ -43,7 +47,7 @@ export class AnnouncementsService {
 
   /** Admins publish into their own college, always as themselves. */
   async create(input: CreateAnnouncementDto, context: AuthorizationContext) {
-    return this.database.announcement.create({
+    const announcement = await this.database.announcement.create({
       data: {
         collegeId: context.collegeId,
         authorId: context.userId,
@@ -55,5 +59,23 @@ export class AnnouncementsService {
       },
       include: authorSelect,
     });
+    // Everyone in the audience is told now; an announcement scheduled for later is not (there is no scheduler yet).
+    const published = announcement.publishedAt !== null && announcement.publishedAt <= new Date();
+    if (this.notifications && published) {
+      const roles: Record<AnnouncementAudience, string[]> = {
+        ALL: ['ADMIN', 'HOD', 'FACULTY', 'STUDENT'],
+        STUDENTS: ['STUDENT'],
+        FACULTY: ['HOD', 'FACULTY'],
+        STAFF: ['ADMIN', 'HOD', 'FACULTY'],
+      };
+      const users = await this.notifications.usersWithRoles(context.collegeId, roles[announcement.audience]);
+      await this.notifications.notify(context.collegeId, users.filter((id) => id !== context.userId), {
+        category: 'ANNOUNCEMENT',
+        title: `Announcement: ${announcement.title}`,
+        body: announcement.body.length > 160 ? `${announcement.body.slice(0, 157)}...` : announcement.body,
+        link: '/dashboard/announcements',
+      });
+    }
+    return announcement;
   }
 }
