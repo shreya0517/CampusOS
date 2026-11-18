@@ -9,7 +9,7 @@ export type ClassRecord = { id: string; collegeId: string; sectionId: string; su
 
 export type AttendanceStudentRef = { id: string; firstName: string; lastName: string; studentCode: string };
 export type AttendanceRecordItem = { id: string; studentId: string; status: AttendanceStatus; note: string | null; student: AttendanceStudentRef };
-export type AttendanceSession = { id: string; classId: string; heldOn: string; createdAt: string; correctionWindowEndsAt: string; class: ClassRecord; records: AttendanceRecordItem[] };
+export type AttendanceSession = { id: string; classId: string; heldOn: string; createdAt: string; correctionWindowHours: number; correctionWindowEndsAt: string; class: ClassRecord; records: AttendanceRecordItem[] };
 type RecordState = { status: AttendanceStatus; note: string | null };
 export type AttendanceHistoryEntry = {
   id: string;

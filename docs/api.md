@@ -105,7 +105,7 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 - GET /api/v1/attendance/me: STUDENT reads only their own attendance. The student is resolved from the access token; the endpoint takes no student id.
   - Query: subjectId?, from?, to? (YYYY-MM-DD, from <= to), page (default 1), pageSize (default 20, max 100). The filters apply to `days` and `records` only; `overall` and `subjects` always cover every record.
   - Response: { threshold, overall, subjects[], days[], records: { items[], total, page, pageSize } }. `overall`, each subject and each day carry { present, absent, late, excused, attended, counted, percentage, belowThreshold }.
-  - LATE counts as attended. EXCUSED is left out of the percentage. `percentage` is null when nothing has been counted yet. `threshold` is 75.
+  - LATE counts as attended. EXCUSED is left out of the percentage. `percentage` is null when nothing has been counted yet. `threshold` is the college's minimum attendance (75 unless an Admin changed it in Settings).
   - Other roles get 403 FORBIDDEN. A STUDENT user without a linked student profile gets 404 STUDENT_NOT_FOUND. Invalid or impossible dates (for example 2026-02-31) return 400 INVALID_INPUT.
 
 ## Announcements
@@ -144,7 +144,7 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 ## Attendance and Marks Entry
 
 - POST /api/v1/attendance and PUT /api/v1/attendance/:id: every record must name a different student who is actively enrolled in the class's section; otherwise 400 DUPLICATE_STUDENT or 400 STUDENT_NOT_IN_CLASS.
-- GET /api/v1/attendance/:id includes `correctionWindowEndsAt`: FACULTY may correct a session for 48 hours after it was first saved; later PUTs from faculty return 403 CORRECTION_WINDOW_CLOSED. HOD and ADMIN are not limited by the window.
+- GET /api/v1/attendance/:id includes `correctionWindowEndsAt`: FACULTY may correct a session for the college's correction window (`correctionWindowHours`, 48 unless an Admin changed it in Settings) after it was first saved; later PUTs from faculty return 403 CORRECTION_WINDOW_CLOSED. The current window applies to every session, including ones marked before it changed. HOD and ADMIN are not limited by the window.
 - Marking a session and every correction that changes a record are written to the audit log (ATTENDANCE_MARKED, ATTENDANCE_CORRECTED) with the actor and, for corrections, each student's status and note before and after; a student left out of a correction is logged with `to: null` (removed).
 - GET /api/v1/attendance/:id/history: ADMIN, HOD and FACULTY who can open the session. Returns the log oldest first: { id, action, createdAt, actor, changes[] } with each change's student.
 - GET and PUT /api/v1/exams/:id/subjects/:examSubjectId/marks: ADMIN reaches every paper, HOD only papers in their department, FACULTY only papers for a subject they teach in that section (or semester, when the paper covers every section); otherwise 403. Marks must name different students enrolled for the paper; otherwise 400 DUPLICATE_STUDENT or 400 STUDENT_NOT_IN_EXAM.
@@ -188,7 +188,7 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 
 - GET /api/v1/overview/institution: ADMIN only (HOD, FACULTY and STUDENT get 403). Everything comes from stored records in the admin's college:
   - `totals`: students, faculty and departments.
-  - `attendance.today` (today in the college's timezone) and `attendance.window` (the last `windowDays`, 30, ending today; future-dated sessions are left out): present, absent, late, excused, `percentage` (late counts as attended, excused is left out) and `belowThreshold` (under 75%).
+  - `attendance.today` (today in the college's timezone) and `attendance.window` (the last `windowDays`, 30, ending today; future-dated sessions are left out): present, absent, late, excused, `percentage` (late counts as attended, excused is left out) and `belowThreshold` (under the college's minimum attendance).
   - `tasks`: task assignments by status, plus `overdue` (past the deadline and not approved).
   - `pendingVisitors` and `upcomingExams` (draft or scheduled, starting today or later).
   - `fees`: `collected` (completed payments), `outstanding` (unpaid balance of issued, partially paid and overdue invoices), `openInvoices` and `overdueInvoices`.
@@ -229,11 +229,11 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 
 - GET /api/v1/attendance/report?from=&to=&departmentId=: ADMIN (every department, or one via departmentId) and HOD (their own; another department returns 403). FACULTY and STUDENT get 403.
   - Dates are YYYY-MM-DD. Without them the report covers the last 30 days, ending today in the college's timezone. A range over 366 days returns 400 RANGE_TOO_LONG.
-  - Returns `range`, `threshold` (75), `sessions` recorded in the range, and the `overall` summary.
+  - Returns `range`, `threshold` (the college's minimum attendance), `sessions` recorded in the range, and the `overall` summary.
   - It also returns `byDepartment`, `byClass` (subject, section, faculty, sessions) and `byMonth` (YYYY-MM).
   - `shortages` lists students under the threshold, lowest first, up to 500, with their active section. `shortageTotal` is how many are short in all, and `shortagesTruncated` says whether the list was cut.
   - Summaries follow the student attendance rules: late counts as attended and excused sessions are left out.
-- Admin decision 2: POST /api/v1/attendance and PUT /api/v1/attendance/:id are HOD and FACULTY only. Admin reads sessions, history and the report but doesn't mark or correct. Faculty correct within 48 hours; the HOD corrects after that.
+- Admin decision 2: POST /api/v1/attendance and PUT /api/v1/attendance/:id are HOD and FACULTY only. Admin reads sessions, history and the report but doesn't mark or correct. Faculty correct within the college's correction window; the HOD corrects after that.
 
 ## Notifications
 
@@ -310,3 +310,18 @@ The response contains:
   - Billed, collected and outstanding by course. An invoice belongs to its fee structure's course and semester, or else to the student's current enrollment.
 - **departments:** one comparison row per department (only the chosen one when filtered). Each row has active students, faculty, students per faculty, attendance %, students below the threshold, assignment completion, pass % and average score from approved marks, and fees collected and outstanding.
 - **options:** the departments and semester numbers for the filters.
+
+## Institution Settings
+
+GET and PUT /api/v1/settings/institution: ADMIN only (others get 403). They back the Institution tab on the Settings page, for the Admin's own college.
+
+- GET returns the college `code`, `name`, `timezone`, `address`, `phone`, `email`, `website`, `attendanceThreshold`, `correctionWindowHours`, `updatedAt`, and `lastChange` ({ at, by } from the audit log, or null).
+- PUT takes the whole form: every field above except `code` and `lastChange`. Blank contact fields are saved as null.
+  - `name`: 2 to 120 characters. `timezone`: an IANA timezone, such as Asia/Kolkata. `address`: up to 300 characters.
+  - `phone`: 7 to 15 digits, with an optional leading + and spaces, hyphens or brackets. `email`: an email address, saved in lowercase. `website`: a full http or https address.
+  - `attendanceThreshold`: a whole number from 1 to 100. `correctionWindowHours`: a whole number from 1 to 720 (30 days).
+  - Anything else returns 400 INVALID_INPUT.
+- `updatedAt` must be the value last read. If another Admin saved in between, the PUT returns 409 SETTINGS_CHANGED and nothing is written.
+- Each save that changes something writes a SETTINGS_UPDATED audit entry with each changed field's old and new value. A save with nothing changed writes nothing.
+- The college code can't be changed: everyone signs in with it.
+- The minimum attendance and the correction window apply as soon as they are saved, to every attendance page, report and dashboard. The timezone decides what "today" is for the dashboards and attendance reports.

@@ -160,6 +160,14 @@ model College {
   code                    String                   @unique
   name                    String
   timezone                String                   @default("Asia/Kolkata")
+  address                 String?
+  phone                   String?
+  email                   String?
+  website                 String?
+  /// Minimum attendance, in percent, a student needs in every subject.
+  attendanceThreshold     Int                      @default(75)
+  /// Hours after a session is first marked during which faculty may still correct it.
+  correctionWindowHours   Int                      @default(48)
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
   roles                   Role[]

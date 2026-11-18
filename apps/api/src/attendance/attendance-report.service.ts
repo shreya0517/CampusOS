@@ -2,7 +2,8 @@ import { BadRequestException, ForbiddenException, Inject, Injectable } from '@ne
 import { DatabaseService } from '../database.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
 import { todayAsStoredDate } from '../overview/institution-overview.service';
-import { ATTENDANCE_THRESHOLD_PERCENT, count, emptyTally, summarize } from './attendance.service';
+import { count, emptyTally, summarize } from './attendance.service';
+import { collegePolicy } from '../settings/college-policy';
 import type { Tally } from './attendance.service';
 
 /** Without dates the report covers this many days, ending today in the college's timezone. */
@@ -40,8 +41,9 @@ export class AttendanceReportService {
     const departmentId = isAdmin ? query.departmentId : (context.departmentId as string);
     const collegeId = context.collegeId;
 
-    const college = await this.database.college.findUnique({ where: { id: collegeId }, select: { timezone: true } });
-    const to = query.to ? new Date(query.to) : todayAsStoredDate(college?.timezone);
+    const policy = await collegePolicy(this.database, collegeId);
+    const threshold = policy.attendanceThreshold;
+    const to = query.to ? new Date(query.to) : todayAsStoredDate(policy.timezone);
     const from = query.from ? new Date(query.from) : new Date(to.getTime() - (REPORT_DEFAULT_DAYS - 1) * 86_400_000);
     if (from > to) throw new BadRequestException({ code: 'INVALID_RANGE', message: 'The start date must be on or before the end date.' });
     if ((to.getTime() - from.getTime()) / 86_400_000 >= REPORT_MAX_DAYS) throw new BadRequestException({ code: 'RANGE_TOO_LONG', message: `A report can cover at most ${REPORT_MAX_DAYS} days.` });
@@ -92,7 +94,7 @@ export class AttendanceReportService {
     const perStudent = new Map<string, Tally>();
     for (const row of byStudent) add(perStudent, row.studentId, row.status, row._count._all);
     const allShort = [...perStudent.entries()]
-      .map(([studentId, tally]) => ({ studentId, summary: summarize(tally) }))
+      .map(([studentId, tally]) => ({ studentId, summary: summarize(tally, threshold) }))
       .filter((entry) => entry.summary.belowThreshold)
       .sort((a, b) => (a.summary.percentage ?? 0) - (b.summary.percentage ?? 0));
     const short = allShort.slice(0, SHORTAGE_LIMIT);
@@ -120,10 +122,10 @@ export class AttendanceReportService {
 
     return {
       range: { from: dateKey(from), to: dateKey(to) },
-      threshold: ATTENDANCE_THRESHOLD_PERCENT,
+      threshold,
       sessions: sessions.length,
-      overall: summarize(overall),
-      byDepartment: departments.map((department) => ({ department, ...summarize(perDepartment.get(department.id) ?? emptyTally()) })),
+      overall: summarize(overall, threshold),
+      byDepartment: departments.map((department) => ({ department, ...summarize(perDepartment.get(department.id) ?? emptyTally(), threshold) })),
       byClass: classes
         .map((cls) => ({
           classId: cls.id,
@@ -131,13 +133,13 @@ export class AttendanceReportService {
           section: { code: cls.section.code, semester: cls.section.semester.name, course: cls.section.semester.course.code, department: cls.section.semester.course.department.code },
           faculty: cls.faculty ? { id: cls.faculty.id, name: `${cls.faculty.firstName} ${cls.faculty.lastName}` } : null,
           sessions: sessionsPerClass.get(cls.id) ?? 0,
-          ...summarize(perClass.get(cls.id) ?? emptyTally()),
+          ...summarize(perClass.get(cls.id) ?? emptyTally(), threshold),
         }))
         .sort((a, b) => a.subject.name.localeCompare(b.subject.name) || a.section.code.localeCompare(b.section.code)),
       // The list is capped; these say how many students are short in all, and whether the list is cut.
       shortageTotal: allShort.length,
       shortagesTruncated: allShort.length > short.length,
-      byMonth: [...perMonth.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, tally]) => ({ month, ...summarize(tally) })),
+      byMonth: [...perMonth.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, tally]) => ({ month, ...summarize(tally, threshold) })),
       shortages: short.map(({ studentId, summary }) => {
         const student = studentById.get(studentId);
         const section = student?.enrollments[0]?.section;

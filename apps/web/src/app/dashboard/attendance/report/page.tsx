@@ -83,7 +83,7 @@ export default function AttendanceReportPage() {
         <h1 className="mt-2 text-2xl font-bold tracking-tight">Attendance Report</h1>
         <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
           {isAdmin ? 'Attendance across the college' : 'Attendance in your department'} from recorded sessions. Late counts as present, excused sessions are left out, and under{' '}
-          {report?.threshold ?? 75}% is a shortage.
+          {report ? `${report.threshold}%` : 'the college minimum'} is a shortage.
         </p>
       </div>
 
