@@ -36,6 +36,9 @@ export class FilesService {
 
     const visibility = input.visibility ?? FileVisibility.PRIVATE;
 
+    // The upload URL first: if storage can't take the file, no record is left pointing at nothing.
+    const uploadUrl = await this.storage.generatePresignedUploadUrl(storageKey, input.mimeType);
+
     const fileRecord = await this.database.file.create({
       data: {
         collegeId: context.collegeId,
@@ -50,8 +53,6 @@ export class FilesService {
         uploadedBy: { select: { id: true, displayName: true, email: true } },
       },
     });
-
-    const uploadUrl = await this.storage.generatePresignedUploadUrl(storageKey, input.mimeType);
 
     return {
       file: fileRecord,

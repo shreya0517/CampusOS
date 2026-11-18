@@ -7,8 +7,10 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 
 process.env.AUTH_ACCESS_TOKEN_SECRET = 'integration-test-secret-with-at-least-thirty-two-characters';
-// These tests cover the sign-up flow itself, which is off unless this is set.
+// These tests cover the sign-up flow itself, which is off unless this is set, and read the verification and reset
+// tokens from the console, which is only written when AUTH_LOG_TOKENS is on.
 process.env.ALLOW_SELF_REGISTRATION = 'true';
+process.env.AUTH_LOG_TOKENS = 'true';
 
 type User = { id: string; collegeId: string; email: string; displayName: string; passwordHash: string; emailVerifiedAt: Date | null; status: 'ACTIVE' };
 type Session = { id: string; collegeId: string; userId: string; refreshTokenHash: string; expiresAt: Date; revokedAt: Date | null };

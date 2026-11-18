@@ -44,11 +44,15 @@ All authentication endpoints are under `/api/v1/auth`. Registration and login re
 - `POST /api/v1/auth/reset-password`: accepts `{ "token", "password" }` with a password of at least 12 characters, returns `204`, and invalidates all existing sessions for the account.
 - `POST /api/v1/auth/change-password`: requires a bearer access token and accepts `{ "currentPassword", "newPassword" }`. The new password needs at least 12 characters and must differ from the current one. Returns `204`, keeps the calling session and revokes every other session of the user. A wrong current password returns `400 INVALID_CURRENT_PASSWORD` (not 401, so clients don't treat it as an expired session); an invalid new password returns `400 INVALID_NEW_PASSWORD`.
 
+Rate limits, kept in memory by each API instance and counted per account (college code and email), not per IP:
+- **Sign-in:** after 10 failed attempts in 15 minutes, further attempts on that account return `429 TOO_MANY_ATTEMPTS` with `retryAfterSeconds` until the window passes, even with the right password. A successful sign-in clears the count.
+- **Password reset:** `forgot-password` allows 5 requests per account per hour, whether or not the account exists.
+
 Malformed authentication request bodies return `400 { "code": "INVALID_INPUT", "message": "Request body is invalid." }`. Invalid login credentials return `401 INVALID_CREDENTIALS`; expired, revoked, or missing sessions return `401 SESSION_EXPIRED` (or `401 UNAUTHORIZED` when a bearer token is absent).
 
 Passwords are stored only as salted scrypt hashes. Refresh, verification, and reset tokens are random opaque values; only HMAC hashes are persisted. Every protected request checks the signed access token and its referenced session; revoked or expired sessions cannot use an otherwise valid access token.
 
-In local development only (`NODE_ENV` is not `production`), registration writes a verification instruction containing the raw token to the API process console. Copy its token and call:
+In local development, with `AUTH_LOG_TOKENS=true` (and `NODE_ENV` not `production`), registration writes a verification instruction containing the raw token to the API process console. Without that flag no token is ever logged, so a staging server that isn't marked as production doesn't leak live tokens. Copy its token and call:
 
 ```http
 POST /api/v1/auth/verify-email
@@ -59,7 +63,7 @@ Content-Type: application/json
 
 Production never logs or returns raw verification tokens. An email delivery provider remains the future production delivery mechanism.
 
-For local password recovery, `POST /api/v1/auth/forgot-password` writes a reset instruction with its opaque token to the API console under the same non-production rule. Use that token with `POST /api/v1/auth/reset-password`. Production never logs or returns reset tokens.
+For local password recovery, `POST /api/v1/auth/forgot-password` writes a reset instruction with its opaque token to the API console under the same `AUTH_LOG_TOKENS` rule. Use that token with `POST /api/v1/auth/reset-password`. Production never logs or returns reset tokens.
 
 API integration tests use the actual Nest controller, guard, service, and token logic with an in-memory Prisma-compatible persistence boundary. They do not claim PostgreSQL integration coverage.
 
@@ -275,6 +279,7 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 
 - GET /api/v1/files and GET /api/v1/files/:id follow one rule: an ADMIN sees every file in the college; everyone else sees their own files and files shared with the college (COLLEGE or PUBLIC visibility). Someone else's PRIVATE file isn't listed, and opening it returns 403.
 - The uploader's email is included only for an ADMIN; others get the uploader's id and name.
+- Without AWS credentials the API runs storage in mock mode and hands out fake `s3.mock.local` URLs, for local development only. In production it refuses uploads and downloads with 503 FILES_NOT_CONFIGURED instead. An upload's record is created only after its upload URL, so a refused upload leaves nothing behind.
 - DELETE /api/v1/files/:id (the owner or an ADMIN) removes the record only once the stored object is deleted (an object that is already missing counts as deleted). If storage fails, it returns 503 FILE_DELETE_FAILED and keeps the record, so deleting again retries instead of leaving an orphaned object.
 
 ## Notifications
