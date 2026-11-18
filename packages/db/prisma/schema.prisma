@@ -424,6 +424,8 @@ model Faculty {
   employeeCode String
   firstName    String
   lastName     String
+  /// Job title such as Professor or Assistant Professor; free text, set by Admin.
+  designation  String?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   college      College      @relation(fields: [collegeId], references: [id], onDelete: Cascade)
