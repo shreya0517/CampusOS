@@ -20,7 +20,8 @@ const STATUS_COLORS: Record<ExamStatus, string> = {
 
 export default function ExamsPage() {
   const { primaryRole } = useAuth();
-  const isAdminOrHOD = primaryRole === 'Admin' || primaryRole === 'HOD';
+  // Exams span the whole college, so only an Admin creates them; HODs add their department's papers to an exam.
+  const isAdmin = primaryRole === 'Admin';
   const isStudent = primaryRole === 'Student';
 
   const [search, setSearch] = useState('');
@@ -67,7 +68,7 @@ export default function ExamsPage() {
               : 'Schedule examinations, record student marks, evaluate percentages, and publish term results.'}
           </p>
         </div>
-        {isAdminOrHOD && (
+        {isAdmin && (
           <Link href="/dashboard/exams/new">
             <Button className="w-full sm:w-auto">+ Create Exam</Button>
           </Link>

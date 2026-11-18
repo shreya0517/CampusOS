@@ -23,6 +23,9 @@ const STAFF_ROLES: AuthorizationContext['roles'] = ['SUPER_ADMIN', 'ADMIN', 'HOD
 const isStaff = (context: AuthorizationContext): boolean => STAFF_ROLES.some((role) => context.roles.includes(role));
 const VISIBLE_TO_STUDENTS: ExamStatus[] = [ExamStatus.SCHEDULED, ExamStatus.COMPLETED];
 
+const isAdmin = (context: AuthorizationContext): boolean => context.roles.includes('ADMIN') || context.roles.includes('SUPER_ADMIN');
+const isUniqueViolation = (error: unknown): boolean => typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'P2002';
+
 const denied = (): never => {
   throw new ForbiddenException({ code: 'FORBIDDEN', message: 'You are not authorized to access this resource.' });
 };
@@ -58,8 +61,9 @@ export class ExamsService {
     return student.id;
   }
 
+  /** An exam spans the whole college, so only an Admin creates, edits or deletes one; HODs add their department's papers. */
   async createExam(input: CreateExamDto, context: AuthorizationContext) {
-    if (context.roles.includes('STUDENT')) denied();
+    if (!isAdmin(context)) denied();
 
     try {
       return await this.database.exam.create({
@@ -159,7 +163,7 @@ export class ExamsService {
   }
 
   async updateExam(id: string, input: UpdateExamDto, context: AuthorizationContext) {
-    if (context.roles.includes('STUDENT')) denied();
+    if (!isAdmin(context)) denied();
 
     const existing = await this.database.exam.findFirst({
       where: { id, collegeId: context.collegeId },
@@ -172,22 +176,71 @@ export class ExamsService {
     if (input.startsOn) data.startsOn = new Date(input.startsOn);
     if (input.endsOn) data.endsOn = new Date(input.endsOn);
 
-    return this.database.exam.update({
-      where: { id },
-      data,
-    });
+    try {
+      return await this.database.exam.update({
+        where: { id },
+        data,
+      });
+    } catch (e) {
+      // Exam names are unique in the college: a rename onto another exam's name is a conflict, not a 500.
+      if (isUniqueViolation(e)) throw new ConflictException({ code: 'EXAM_ALREADY_EXISTS', message: 'An exam with this name already exists in the college.' });
+      throw e;
+    }
   }
 
+  /**
+   * Deleting an exam removes its papers, marks and results with it, so it is refused once any marks are under review
+   * or approved, or results exist: cancel the exam instead. Every delete is audited.
+   */
   async deleteExam(id: string, context: AuthorizationContext) {
-    if (!context.roles.includes('ADMIN') && !context.roles.includes('HOD')) denied();
+    if (!isAdmin(context)) denied();
 
     const existing = await this.database.exam.findFirst({
       where: { id, collegeId: context.collegeId },
     });
     if (!existing) examMissing();
 
-    await this.database.exam.delete({ where: { id } });
+    await this.database.$transaction(async (tx) => {
+      const [reviewedPapers, results] = await Promise.all([
+        tx.examSubject.count({ where: { collegeId: context.collegeId, examId: id, marksStatus: { not: 'DRAFT' } } }),
+        tx.result.count({ where: { collegeId: context.collegeId, examId: id } }),
+      ]);
+      if (reviewedPapers > 0 || results > 0) {
+        throw new ConflictException({ code: 'EXAM_HAS_MARKS', message: 'This exam has marks under review, approved marks or results. Cancel it instead of deleting it.' });
+      }
+      await tx.auditLog.create({
+        data: { collegeId: context.collegeId, actorId: context.userId, action: 'EXAM_DELETED', entityType: 'Exam', entityId: id, metadata: { name: existing!.name, status: existing!.status } },
+      });
+      await tx.exam.delete({ where: { id } });
+    });
     return { success: true };
+  }
+
+  /**
+   * Papers are added and removed by an Admin, or by the HOD of the paper's department; faculty enter marks. Once an
+   * exam's results are published its papers are fixed.
+   */
+  private async assertManagesPaper(paper: { semesterId: string; sectionId: string | null }, context: AuthorizationContext): Promise<void> {
+    if (isAdmin(context)) return;
+    if (!context.roles.includes('HOD') || !context.departmentId) denied();
+    await this.assertHodDepartment(paper, context);
+  }
+
+  /** The paper's semester and, for a section paper, its section are both in the HOD's department. */
+  private async assertHodDepartment(paper: { semesterId: string; sectionId: string | null }, context: AuthorizationContext): Promise<void> {
+    const departmentId = context.departmentId ?? '';
+    const [semesterInDepartment, sectionInDepartment] = await Promise.all([
+      this.database.semester.findFirst({ where: { id: paper.semesterId, collegeId: context.collegeId, course: { departmentId } }, select: { id: true } }),
+      paper.sectionId
+        ? this.database.section.findFirst({ where: { id: paper.sectionId, collegeId: context.collegeId, semester: { course: { departmentId } } }, select: { id: true } })
+        : Promise.resolve({ id: null }),
+    ]);
+    if (!semesterInDepartment || !sectionInDepartment) denied();
+  }
+
+  private async assertNoResults(examId: string, context: AuthorizationContext): Promise<void> {
+    const results = await this.database.result.count({ where: { collegeId: context.collegeId, examId } });
+    if (results > 0) throw new ConflictException({ code: 'RESULTS_PUBLISHED', message: 'Results for this exam are already published, so its papers are fixed.' });
   }
 
   async addExamSubject(examId: string, input: CreateExamSubjectDto, context: AuthorizationContext) {
@@ -197,6 +250,8 @@ export class ExamsService {
       where: { id: examId, collegeId: context.collegeId },
     });
     if (!exam) throw examMissing();
+    await this.assertManagesPaper({ semesterId: input.semesterId, sectionId: input.sectionId ?? null }, context);
+    await this.assertNoResults(examId, context);
 
     // The subject and the optional section must both belong to the paper's semester; otherwise a paper could pair one
     // department's semester with another department's section and slip past department checks.
@@ -234,6 +289,7 @@ export class ExamsService {
     }
   }
 
+  /** Removing a paper deletes its marks, so only a paper whose marks are still a draft can go, and it is audited. */
   async removeExamSubject(examId: string, examSubjectId: string, context: AuthorizationContext) {
     if (context.roles.includes('STUDENT')) denied();
 
@@ -241,8 +297,20 @@ export class ExamsService {
       where: { id: examSubjectId, examId, collegeId: context.collegeId },
     });
     if (!item) examSubjectMissing();
+    await this.assertManagesPaper(item!, context);
+    await this.assertNoResults(examId, context);
 
-    await this.database.examSubject.delete({ where: { id: examSubjectId } });
+    await this.database.$transaction(async (tx) => {
+      // Only while its marks are still a draft, checked in the delete itself so a submission at the same moment wins.
+      const marks = await tx.mark.count({ where: { collegeId: context.collegeId, examSubjectId } });
+      const removed = await tx.examSubject.deleteMany({ where: { id: examSubjectId, collegeId: context.collegeId, marksStatus: 'DRAFT' } });
+      if (removed.count !== 1) {
+        throw new ConflictException({ code: 'MARKS_IN_REVIEW', message: 'Marks for this paper are under review or approved, so it cannot be removed.' });
+      }
+      await tx.auditLog.create({
+        data: { collegeId: context.collegeId, actorId: context.userId, action: 'EXAM_PAPER_REMOVED', entityType: 'Exam', entityId: examId, metadata: { examSubjectId, subjectId: item!.subjectId, marks } },
+      });
+    });
     return { success: true };
   }
 
@@ -254,15 +322,7 @@ export class ExamsService {
     if (context.roles.includes('ADMIN') || context.roles.includes('SUPER_ADMIN')) return;
     if (context.roles.includes('HOD')) {
       if (!context.departmentId) denied();
-      const departmentId = context.departmentId ?? '';
-      // Both the semester and, for section papers, the section must be in the HOD's department.
-      const [semesterInDepartment, sectionInDepartment] = await Promise.all([
-        this.database.semester.findFirst({ where: { id: examSubject.semesterId, collegeId: context.collegeId, course: { departmentId } }, select: { id: true } }),
-        examSubject.sectionId
-          ? this.database.section.findFirst({ where: { id: examSubject.sectionId, collegeId: context.collegeId, semester: { course: { departmentId } } }, select: { id: true } })
-          : Promise.resolve({ id: null }),
-      ]);
-      if (!semesterInDepartment || !sectionInDepartment) denied();
+      await this.assertHodDepartment(examSubject, context);
       return;
     }
     const teaches = await this.database.class.findFirst({
@@ -654,8 +714,18 @@ export class ExamsService {
     });
     if (!exam) throw examMissing();
 
+    // Admins see every result. An HOD sees their department's students; faculty the students in sections they teach.
+    let studentScope: Record<string, unknown> = {};
+    if (!isAdmin(context)) {
+      if (context.roles.includes('HOD')) {
+        if (!context.departmentId) denied();
+        studentScope = { student: { enrollments: { some: { collegeId: context.collegeId, section: { semester: { course: { departmentId: context.departmentId } } } } } } };
+      } else {
+        studentScope = { student: { enrollments: { some: { collegeId: context.collegeId, status: 'ACTIVE', section: { classes: { some: { faculty: { userId: context.userId } } } } } } } };
+      }
+    }
     const results = await this.database.result.findMany({
-      where: { collegeId: context.collegeId, examId },
+      where: { collegeId: context.collegeId, examId, ...studentScope },
       include: {
         student: STUDENT_SUMMARY,
       },
