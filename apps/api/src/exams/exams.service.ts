@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ExamStatus, ResultStatus } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { DatabaseService } from '../database.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
 import type {
@@ -22,6 +23,14 @@ const STUDENT_SUMMARY = { select: { id: true, studentCode: true, firstName: true
 const STAFF_ROLES: AuthorizationContext['roles'] = ['SUPER_ADMIN', 'ADMIN', 'HOD', 'FACULTY'];
 const isStaff = (context: AuthorizationContext): boolean => STAFF_ROLES.some((role) => context.roles.includes(role));
 const VISIBLE_TO_STUDENTS: ExamStatus[] = [ExamStatus.SCHEDULED, ExamStatus.COMPLETED];
+
+/**
+ * Locks an exam's row for the rest of the transaction. Publishing results, adding or removing a paper and deleting
+ * the exam all take it first, so they happen one at a time for the same exam.
+ */
+const lockExam = async (tx: Prisma.TransactionClient, examId: string, collegeId: string): Promise<void> => {
+  await tx.$queryRaw`SELECT id FROM "Exam" WHERE id = ${examId} AND "collegeId" = ${collegeId} FOR UPDATE`;
+};
 
 const isAdmin = (context: AuthorizationContext): boolean => context.roles.includes('ADMIN') || context.roles.includes('SUPER_ADMIN');
 const isUniqueViolation = (error: unknown): boolean => typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'P2002';
@@ -201,6 +210,10 @@ export class ExamsService {
     if (!existing) examMissing();
 
     await this.database.$transaction(async (tx) => {
+      // Lock the exam (publishing takes the same lock) and its papers (submitting or reviewing marks updates them), so
+      // the check below can't go stale before the cascade deletes the marks.
+      await lockExam(tx, id, context.collegeId);
+      await tx.$queryRaw`SELECT id FROM "ExamSubject" WHERE "examId" = ${id} AND "collegeId" = ${context.collegeId} FOR UPDATE`;
       const [reviewedPapers, results] = await Promise.all([
         tx.examSubject.count({ where: { collegeId: context.collegeId, examId: id, marksStatus: { not: 'DRAFT' } } }),
         tx.result.count({ where: { collegeId: context.collegeId, examId: id } }),
@@ -238,8 +251,8 @@ export class ExamsService {
     if (!semesterInDepartment || !sectionInDepartment) denied();
   }
 
-  private async assertNoResults(examId: string, context: AuthorizationContext): Promise<void> {
-    const results = await this.database.result.count({ where: { collegeId: context.collegeId, examId } });
+  private async assertNoResults(client: Pick<Prisma.TransactionClient, 'result'>, examId: string, context: AuthorizationContext): Promise<void> {
+    const results = await client.result.count({ where: { collegeId: context.collegeId, examId } });
     if (results > 0) throw new ConflictException({ code: 'RESULTS_PUBLISHED', message: 'Results for this exam are already published, so its papers are fixed.' });
   }
 
@@ -251,7 +264,6 @@ export class ExamsService {
     });
     if (!exam) throw examMissing();
     await this.assertManagesPaper({ semesterId: input.semesterId, sectionId: input.sectionId ?? null }, context);
-    await this.assertNoResults(examId, context);
 
     // The subject and the optional section must both belong to the paper's semester; otherwise a paper could pair one
     // department's semester with another department's section and slip past department checks.
@@ -264,7 +276,11 @@ export class ExamsService {
     }
 
     try {
-      return await this.database.examSubject.create({
+      // Under the exam lock that publishing also takes, so a paper can't be added while results are being published.
+      return await this.database.$transaction(async (tx) => {
+        await lockExam(tx, examId, context.collegeId);
+        await this.assertNoResults(tx, examId, context);
+        return tx.examSubject.create({
         data: {
           collegeId: context.collegeId,
           examId,
@@ -280,6 +296,7 @@ export class ExamsService {
           semester: true,
           section: true,
         },
+        });
       });
     } catch (e) {
       if (typeof e === 'object' && e !== null && 'code' in e && (e as { code: string }).code === 'P2002') {
@@ -298,9 +315,10 @@ export class ExamsService {
     });
     if (!item) examSubjectMissing();
     await this.assertManagesPaper(item!, context);
-    await this.assertNoResults(examId, context);
 
     await this.database.$transaction(async (tx) => {
+      await lockExam(tx, examId, context.collegeId);
+      await this.assertNoResults(tx, examId, context);
       // Only while its marks are still a draft, checked in the delete itself so a submission at the same moment wins.
       const marks = await tx.mark.count({ where: { collegeId: context.collegeId, examSubjectId } });
       const removed = await tx.examSubject.deleteMany({ where: { id: examSubjectId, collegeId: context.collegeId, marksStatus: 'DRAFT' } });
@@ -648,6 +666,16 @@ export class ExamsService {
     const now = new Date();
 
     await this.database.$transaction(async (tx) => {
+      // Lock the exam, then check the papers again: one added, removed or reopened since they were read above would
+      // otherwise be left out of the results.
+      await lockExam(tx, examId, context.collegeId);
+      const [papers, approved] = await Promise.all([
+        tx.examSubject.count({ where: { collegeId: context.collegeId, examId } }),
+        tx.examSubject.count({ where: { collegeId: context.collegeId, examId, marksStatus: 'APPROVED' } }),
+      ]);
+      if (papers !== exam.examSubjects.length || approved !== papers) {
+        throw new ConflictException({ code: 'EXAM_CHANGED', message: "The exam's papers changed while results were being published. Try again." });
+      }
       for (const [studentId, marksList] of studentMarksMap.entries()) {
         let totalMax = 0;
         let totalObtained = 0;

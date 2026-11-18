@@ -39,7 +39,9 @@ describe('ExamsService', () => {
       create: jest.fn(),
       findFirst: jest.fn(),
       delete: jest.fn(),
+      count: jest.fn().mockResolvedValue(1),
     },
+    $queryRaw: jest.fn().mockResolvedValue([]),
     mark: {
       findMany: jest.fn(),
       upsert: jest.fn(),
@@ -132,6 +134,14 @@ describe('ExamsService', () => {
     await expect(service.getExam('exam-1', superAdmin)).resolves.toMatchObject({ status: ExamStatus.DRAFT });
     await service.listExams({ page: 1, pageSize: 20 }, superAdmin);
     expect(database.exam.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: { collegeId: 'col-a' } }));
+  });
+
+  it('refuses to publish when a paper was added or reopened after the papers were read', async () => {
+    database.exam.findFirst.mockResolvedValue({ id: 'exam-1', collegeId: 'col-a', examSubjects: [{ id: 'es-1', maxMarks: 100, passMarks: 40, marksStatus: 'APPROVED', marks: [] }] });
+    // Under the lock there are now two papers, one of them still a draft.
+    database.examSubject.count.mockResolvedValueOnce(2).mockResolvedValueOnce(1);
+    await expect(service.calculateAndPublishResults('exam-1', admin)).rejects.toMatchObject({ response: { code: 'EXAM_CHANGED' } });
+    expect(database.result.upsert).not.toHaveBeenCalled();
   });
 
   it('validates marks obtained does not exceed maxMarks on updateSubjectMarks', async () => {
@@ -267,6 +277,7 @@ describe('ExamsService marks access', () => {
     exam: { findFirst: jest.fn(), update: jest.fn(), delete: jest.fn() },
     result: { count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) },
     auditLog: { findMany: jest.fn().mockResolvedValue([]), create: jest.fn() },
+    $queryRaw: jest.fn().mockResolvedValue([]),
     $transaction: jest.fn(),
   };
   database.$transaction.mockImplementation((fn: (tx: typeof database) => Promise<unknown>) => fn(database));
@@ -317,6 +328,7 @@ describe('ExamsService marks access', () => {
 
   it('refuses to delete an exam with marks under review or results, and audits a delete', async () => {
     database.exam.findFirst.mockResolvedValue({ id: 'exam-1', collegeId: 'col-a', name: 'Mids', status: 'DRAFT' });
+    database.examSubject.count.mockResolvedValue(0);
     database.examSubject.count.mockResolvedValueOnce(1);
     await expect(service.deleteExam('exam-1', admin)).rejects.toMatchObject({ response: { code: 'EXAM_HAS_MARKS' } });
     database.result.count.mockResolvedValueOnce(4);
@@ -324,6 +336,11 @@ describe('ExamsService marks access', () => {
     expect(database.exam.delete).not.toHaveBeenCalled();
     await expect(service.deleteExam('exam-1', admin)).resolves.toEqual({ success: true });
     expect(database.auditLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({ action: 'EXAM_DELETED', entityId: 'exam-1', metadata: { name: 'Mids', status: 'DRAFT' } }) });
+    // The exam and its papers are locked before the check, so marks submitted at the same moment can't be cascaded away.
+    expect(database.$queryRaw).toHaveBeenCalled();
+    const locks = database.$queryRaw.mock.calls.map(([sql]) => (sql as string[]).join('?'));
+    expect(locks.some((sql) => sql.includes('FROM "Exam"') && sql.includes('FOR UPDATE'))).toBe(true);
+    expect(locks.some((sql) => sql.includes('FROM "ExamSubject"') && sql.includes('FOR UPDATE'))).toBe(true);
   });
 
   it("lets an HOD add and remove only their department's papers", async () => {
