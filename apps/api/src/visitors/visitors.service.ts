@@ -74,6 +74,7 @@ export class VisitorsService {
     const where: Record<string, unknown> = { collegeId: context.collegeId };
 
     if (query.status) where.status = query.status;
+    if (query.on) where.visitDate = new Date(query.on);
 
     if (this.isAdmin(context)) {
       // sees all
@@ -111,6 +112,51 @@ export class VisitorsService {
     }
 
     return visitor;
+  }
+
+  /**
+   * The front desk records arrival and departure: an approved visitor is checked in, a checked-in one checked out. Same
+   * scope as approvals (Admin everywhere, HOD for their department). The status only moves forward, so a second click
+   * or a parallel request gets a conflict instead of overwriting the time. Audited; the host (or whoever registered the
+   * visitor) is told when they arrive.
+   */
+  async checkIn(id: string, context: AuthorizationContext): Promise<unknown> {
+    return this.moveVisitor(id, VisitorStatus.APPROVED, VisitorStatus.CHECKED_IN, context);
+  }
+
+  async checkOut(id: string, context: AuthorizationContext): Promise<unknown> {
+    return this.moveVisitor(id, VisitorStatus.CHECKED_IN, VisitorStatus.CHECKED_OUT, context);
+  }
+
+  private async moveVisitor(id: string, from: VisitorStatus, to: VisitorStatus, context: AuthorizationContext): Promise<unknown> {
+    if (!this.isAdmin(context) && !this.isHod(context)) denied();
+    const hodOnly = this.isHod(context) && !this.isAdmin(context);
+    const visitor = await this.database.visitor.findFirst({ where: { id, collegeId: context.collegeId, ...(hodOnly ? this.hodScope(context) : {}) } });
+    if (!visitor) visitorMissing();
+    const now = new Date();
+    const moved = await this.database.visitor.updateMany({
+      where: { id, collegeId: context.collegeId, status: from },
+      data: to === VisitorStatus.CHECKED_IN ? { status: to, checkedInAt: now } : { status: to, checkedOutAt: now },
+    });
+    if (moved.count !== 1) {
+      throw new ConflictException(
+        to === VisitorStatus.CHECKED_IN
+          ? { code: 'VISITOR_NOT_APPROVED', message: 'Only an approved visitor who has not arrived yet can be checked in.' }
+          : { code: 'VISITOR_NOT_CHECKED_IN', message: 'Only a visitor who is checked in can be checked out.' },
+      );
+    }
+    await this.database.auditLog.create({
+      data: { collegeId: context.collegeId, actorId: context.userId, action: to === VisitorStatus.CHECKED_IN ? 'VISITOR_CHECKED_IN' : 'VISITOR_CHECKED_OUT', entityType: 'Visitor', entityId: id },
+    });
+    if (to === VisitorStatus.CHECKED_IN) {
+      await this.notifications?.notify(context.collegeId, [visitor!.hostUserId ?? visitor!.registeredByUserId].filter((userId) => userId !== context.userId), {
+        category: 'VISITOR',
+        title: `Your visitor has arrived: ${visitor!.name}`,
+        body: `${visitor!.purpose} · checked in at ${now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`,
+        link: '/dashboard/visitors',
+      });
+    }
+    return this.database.visitor.findFirst({ where: { id, collegeId: context.collegeId }, include: visitorInclude });
   }
 
   async reviewVisitor(id: string, input: ReviewVisitorDto, context: AuthorizationContext): Promise<unknown> {

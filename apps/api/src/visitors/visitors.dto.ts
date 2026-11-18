@@ -17,6 +17,8 @@ export type ReviewVisitorDto = {
 
 export type VisitorListQuery = {
   status?: string;
+  /** Only visitors expected on this date (YYYY-MM-DD), for the front desk. */
+  on?: string;
   page: number;
   pageSize: number;
 };
@@ -68,8 +70,11 @@ export const parseVisitorListQuery = (v: unknown): VisitorListQuery => {
   const q = object(v);
   const status = q.status === undefined ? undefined : string(q.status);
   if (status !== undefined && !VALID_VISITOR_STATUSES.includes(status)) invalid();
+  const on = q.on === undefined || q.on === '' ? undefined : string(q.on);
+  if (on !== undefined && (!/^\d{4}-\d{2}-\d{2}$/.test(on) || Number.isNaN(Date.parse(on)) || new Date(on).toISOString().slice(0, 10) !== on)) invalid();
   return {
     status,
+    on,
     page: integer(q.page, 1, 10_000),
     pageSize: integer(q.pageSize, 20, 100),
   };
