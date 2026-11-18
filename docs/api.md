@@ -180,3 +180,13 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
   - `coursework` (up to 50 recent assignments in the student's active classes, each GRADED, SUBMITTED, LATE, RETURNED, NOT_SUBMITTED or MISSING when past due without a submission; a saved draft counts as not submitted; undated assignments come last);
   - published `results`;
   - `fees`, for Admin only: invoices with paid and balance, and every payment attempt. It is `null` for an HOD, who has no unrestricted financial access.
+
+## Faculty Administration
+
+- Faculty rows (list and single record) carry `designation` (free text, up to 80 characters), `isHod` and `classCount` for everyone who can read them. Admin and HOD also get `account` (`{ email, status }`, or null without a sign-in account); faculty don't.
+- GET /api/v1/faculty/:id also returns `classes` (subject, section, semester and course of each class taught).
+- POST /api/v1/faculty: ADMIN only. Accepts `designation` and an optional `email`. With an email, it also creates a FACULTY sign-in account (marked verified, since Admin vouches for it) and returns `temporaryPassword` once; it is never stored or shown again. The faculty member signs in with it and changes it under Settings. The record, the account and the role are created together or not at all; a taken email returns 409 ACCOUNT_EXISTS.
+- POST /api/v1/faculty/:id/account: ADMIN only, body `{ "email": string }`. Creates a sign-in account for a faculty member who has none and returns `temporaryPassword` once; 409 ACCOUNT_EXISTS if they already have one.
+- PUT /api/v1/faculty/:id/account: ADMIN only, body `{ "status": "ACTIVE" | "INACTIVE" }`. Deactivating ends all of the person's sessions. 409 NO_ACCOUNT without an account, 409 OWN_ACCOUNT for your own.
+- Account creation and status changes are audited (FACULTY_ACCOUNT_CREATED, FACULTY_ACCOUNT_ACTIVATED, FACULTY_ACCOUNT_DEACTIVATED).
+- PUT /api/v1/faculty/:id accepts `designation` (null or an empty string clears it) and `departmentId`.
