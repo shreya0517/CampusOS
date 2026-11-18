@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
-import { TasksService } from './tasks.service';
+import { TasksService, taskStatusFrom } from './tasks.service';
 import type { DatabaseService } from '../database.service';
 import type { EventsService } from '../events/events.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
@@ -12,8 +12,10 @@ type MockDb = {
     findMany: jest.Mock;
     count: jest.Mock;
     update: jest.Mock;
+    updateMany: jest.Mock;
     delete: jest.Mock;
   };
+  $queryRaw: jest.Mock;
   taskAssignment: {
     create: jest.Mock;
     findFirst: jest.Mock;
@@ -62,12 +64,14 @@ describe('TasksService WebSocket Event Emissions', () => {
         findMany: jest.fn(),
         count: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         delete: jest.fn(),
       },
+      $queryRaw: jest.fn().mockResolvedValue([]),
       taskAssignment: {
         create: jest.fn(),
         findFirst: jest.fn(),
-        findMany: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
         count: jest.fn(),
         update: jest.fn(),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -283,6 +287,7 @@ describe('TasksService WebSocket Event Emissions', () => {
         },
       };
       mockDatabase.taskAssignment.findFirst.mockResolvedValue({ ...existing, taskId: 'task-100' });
+      mockDatabase.taskAssignment.findMany.mockResolvedValueOnce([{ status: TaskStatus.SUBMITTED }]);
 
       await service.submitTask('assign-1', { content: 'All graded' }, facultyContext);
 
@@ -290,6 +295,11 @@ describe('TasksService WebSocket Event Emissions', () => {
         where: { id: 'assign-1', collegeId: 'college-1', assigneeUserId: 'faculty-1', status: TaskStatus.IN_PROGRESS },
         data: { status: TaskStatus.SUBMITTED, submissionContent: 'All graded', submittedAt: expect.any(Date) },
       });
+      // The event carries the status just worked out, not the one read before the change.
+      expect(mockEventsService.emitTaskSubmitted).toHaveBeenCalledWith(expect.objectContaining({ status: TaskStatus.SUBMITTED }), 'college-1', 'dept-1');
+      // The task's status is worked out again from its assignments, with the task row locked.
+      expect(mockDatabase.$queryRaw).toHaveBeenCalled();
+      expect(mockDatabase.task.updateMany).toHaveBeenCalledWith({ where: { id: 'task-100', collegeId: 'college-1' }, data: { status: expect.any(String) } });
       // Every attempt is kept, since a resubmission replaces the stored content.
       expect(mockDatabase.auditLog.create).toHaveBeenCalledWith({
         data: { collegeId: 'college-1', actorId: 'faculty-1', action: 'TASK_SUBMITTED', entityType: 'TaskAssignment', entityId: 'assign-1', metadata: { taskId: 'task-100', content: 'All graded' } },
@@ -425,14 +435,30 @@ describe('TasksService my assignment stats', () => {
   });
 });
 
+describe('task status', () => {
+  it('sums up the assignments', () => {
+    const { PENDING, IN_PROGRESS, SUBMITTED, APPROVED, REWORK } = TaskStatus;
+    expect(taskStatusFrom([])).toBe(PENDING);
+    expect(taskStatusFrom([PENDING, PENDING])).toBe(PENDING);
+    expect(taskStatusFrom([PENDING, IN_PROGRESS])).toBe(IN_PROGRESS);
+    expect(taskStatusFrom([APPROVED, PENDING])).toBe(IN_PROGRESS);
+    expect(taskStatusFrom([REWORK, IN_PROGRESS])).toBe(REWORK);
+    expect(taskStatusFrom([SUBMITTED, REWORK, APPROVED])).toBe(SUBMITTED);
+    expect(taskStatusFrom([APPROVED, APPROVED])).toBe(APPROVED);
+  });
+});
+
 describe('TasksService assignment boundaries', () => {
   const hod: AuthorizationContext = { userId: 'hod-1', collegeId: 'college-1', roles: ['HOD'], permissions: [], departmentId: 'dept-1' };
   const admin: AuthorizationContext = { userId: 'admin-1', collegeId: 'college-1', roles: ['ADMIN'], permissions: [], departmentId: null };
   const database = {
-    task: { findFirst: jest.fn().mockResolvedValue({ id: 'task-1', title: 'Report', departmentId: 'dept-1' }) },
-    taskAssignment: { create: jest.fn() },
+    task: { findFirst: jest.fn().mockResolvedValue({ id: 'task-1', title: 'Report', departmentId: 'dept-1' }), updateMany: jest.fn() },
+    taskAssignment: { create: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
     user: { findFirst: jest.fn() },
+    $queryRaw: jest.fn().mockResolvedValue([]),
+    $transaction: jest.fn(),
   };
+  database.$transaction.mockImplementation((work: (tx: typeof database) => Promise<unknown>) => work(database));
   const events = { emitTaskAssigned: jest.fn() };
   const service = new TasksService(database as unknown as DatabaseService, events as unknown as EventsService);
   beforeEach(() => jest.clearAllMocks());
