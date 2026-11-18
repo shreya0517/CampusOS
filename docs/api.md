@@ -249,3 +249,37 @@ The actor is never notified about their own action. Finding the recipients and s
 - POST /api/v1/students accepts an optional `email`. With it, the student's STUDENT sign-in account is created too (marked verified, as Admin vouches for it), and `temporaryPassword` is returned once; it is never stored in plain text or shown again. The record, account and role are created together or not at all. A taken email returns 409 ACCOUNT_EXISTS, a taken student code 409 STUDENT_EXISTS.
 - POST /api/v1/students/:id/account: ADMIN only, body `{ "email": string }`. Creates an account for a student who has none and returns `temporaryPassword` once; 409 ACCOUNT_EXISTS if they already have one.
 - Both are audited as STUDENT_ACCOUNT_CREATED. The student signs in with the temporary password and changes it under Settings. Faculty accounts work the same way, and both share `auth/accounts.ts`.
+
+## Institutional Analytics
+
+GET /api/v1/overview/analytics: ADMIN only (HOD and others get 403). It backs the Institutional Overview page. Every figure is computed from stored records.
+
+Optional query: `departmentId` (an unknown one returns 404 DEPARTMENT_NOT_FOUND), `semester` (a semester number, 1 to 12), and `from` / `to` (YYYY-MM-DD). With no dates, the range is the current month plus the five before it, ending today in the college's timezone. A range covers at most 366 days (400 RANGE_TOO_LONG) and must not end before it starts (400).
+
+Which figures use the date range:
+
+- **Attendance:** by session date.
+- **New enrollments:** by enrollment date.
+- **Assignments:** those whose due date fell in the range and has already passed.
+- **Exams:** those whose start date falls in the range (cancelled exams are left out).
+- **Collections and payment attempts:** by payment date (the creation date if there is no payment date).
+
+Head counts, billed and outstanding fees, and invoice status are as of today.
+
+The response contains:
+
+- **students:** total on record, active (currently enrolled) and inactive; active students by course and by semester number; new enrollments per month.
+- **faculty:** total; with an active sign-in account, with a disabled account, or with no account; by designation; active students per faculty member. Faculty aren't tied to a semester, so the semester filter doesn't apply to them, and the ratio always uses each department's full student count.
+- **attendance:** the overall summary, by semester and by month, using the same rules as elsewhere (late counts as present, excused sessions are left out). It also gives the number of students below the threshold out of students with counted sessions.
+- **academics:**
+  - **Assignment completion:** submissions (on time or late) from the students now actively enrolled in each class's section, out of those students. Submissions from students who have left the section don't count.
+  - **Published results:** a student passes an exam by passing every paper.
+  - **Approved marks:** counted paper by paper, so they can be split by department and semester before results are published. Absent, or no mark entered, counts as not passed with a score of 0.
+  - A per-exam table.
+- **finance:**
+  - Totals: billed and paid (non-draft, non-void invoices), outstanding, collection rate, overdue invoices and amount, and collected in the range.
+  - Collections per month, plus payment attempts by status.
+  - Invoice status worked out from the balance: PAID, PARTIALLY_PAID, UNPAID, OVERDUE (open, past due, money still owed) or VOID. The stored status isn't trusted because nothing marks invoices overdue yet.
+  - Billed, collected and outstanding by course. An invoice belongs to its fee structure's course and semester, or else to the student's current enrollment.
+- **departments:** one comparison row per department (only the chosen one when filtered). Each row has active students, faculty, students per faculty, attendance %, students below the threshold, assignment completion, pass % and average score from approved marks, and fees collected and outstanding.
+- **options:** the departments and semester numbers for the filters.
