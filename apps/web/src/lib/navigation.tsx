@@ -179,6 +179,7 @@ export function isRouteAllowedForRole(pathname: string, role: CanonicalRole): bo
     if (clean === '/dashboard/tasks/new') return false; // tasks creation is ADMIN/HOD only
     if (clean === '/dashboard/timetable/new') return false; // timetables are built by Admin
     if (clean === '/dashboard/students/new') return false; // students are added by Admin
+    if (clean === '/dashboard/faculty/new') return false; // faculty are added by Admin
     if (clean === '/foundation') return false;
 
     // Allowed: tasks (list, my, view), attendance, timetable, assignments, students, exams, faculty, faculty/me, files, visitors
@@ -192,6 +193,7 @@ export function isRouteAllowedForRole(pathname: string, role: CanonicalRole): bo
     if (clean.startsWith('/dashboard/fees')) return false;
     if (clean === '/dashboard/timetable/new') return false; // timetables are built by Admin
     if (clean === '/dashboard/students/new') return false; // students are added by Admin
+    if (clean === '/dashboard/faculty/new') return false; // faculty are added by Admin
     if (clean === '/dashboard/institutional-overview') return false;
     if (clean === '/foundation') return false;
 
