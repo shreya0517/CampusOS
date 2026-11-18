@@ -939,6 +939,8 @@ model Visitor {
   visitDate          DateTime      @db.Date
   status             VisitorStatus @default(PENDING)
   approvedAt         DateTime?
+  checkedInAt        DateTime?
+  checkedOutAt       DateTime?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
   college            College       @relation(fields: [collegeId], references: [id], onDelete: Cascade)

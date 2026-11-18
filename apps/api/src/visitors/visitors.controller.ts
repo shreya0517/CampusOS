@@ -34,6 +34,18 @@ export class VisitorsController {
     return this.service.getVisitor(id, context);
   }
 
+  @Put(':id/check-in')
+  @RequireRoles('ADMIN', 'HOD')
+  async checkIn(@Param('id') id: string, @CurrentAuthorization() context: AuthorizationContext) {
+    return this.service.checkIn(id, context);
+  }
+
+  @Put(':id/check-out')
+  @RequireRoles('ADMIN', 'HOD')
+  async checkOut(@Param('id') id: string, @CurrentAuthorization() context: AuthorizationContext) {
+    return this.service.checkOut(id, context);
+  }
+
   @Put(':id/review')
   @RequireRoles('ADMIN', 'HOD')
   async reviewVisitor(@Param('id') id: string, @Body() body: unknown, @CurrentAuthorization() context: AuthorizationContext) {

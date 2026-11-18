@@ -235,3 +235,11 @@ Raised today:
 | Announcement published now | Everyone in its audience (scheduled ones are not announced: there is no scheduler yet) |
 
 The actor is never notified about their own action. Finding the recipients and storing notifications never fails or undoes the action that raised them; errors are logged.
+
+## Visitor Check-in and Check-out
+
+- PUT /api/v1/visitors/:id/check-in: ADMIN and HOD (HOD for their department's visitors, as with approvals). Moves an APPROVED visitor to CHECKED_IN and records `checkedInAt`; anything else returns 409 VISITOR_NOT_APPROVED. The host (or, without a host, whoever registered the visitor) gets a "Your visitor has arrived" notification.
+- PUT /api/v1/visitors/:id/check-out: same roles. Moves a CHECKED_IN visitor to CHECKED_OUT and records `checkedOutAt`; anything else returns 409 VISITOR_NOT_CHECKED_IN.
+- Both moves are conditional on the current status, so a repeated or parallel request gets 409 instead of overwriting the time. Both are audited (VISITOR_CHECKED_IN, VISITOR_CHECKED_OUT).
+- GET /api/v1/visitors accepts `on=YYYY-MM-DD` to list visitors expected that day, alongside `status`.
+- GET /api/v1/visitors/my returns a plain list (not a page) of the caller's registrations.
