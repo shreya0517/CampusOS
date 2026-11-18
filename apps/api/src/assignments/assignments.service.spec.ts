@@ -31,6 +31,7 @@ const mockAssignment = {
 };
 
 const mockSubmission = {
+  updatedAt: new Date('2026-11-18T10:00:00.000Z'),
   id: 'sub-1',
   collegeId: 'col-a',
   assignmentId: 'ass-1',
@@ -152,9 +153,20 @@ describe('AssignmentsService', () => {
     const result = await service.gradeSubmission('ass-1', 'sub-1', { marksAwarded: 90, feedback: 'Good' }, faculty);
     expect(result.marksAwarded).toBe(90);
     expect(database.submission.updateMany).toHaveBeenCalledWith({
-      where: { id: 'sub-1', collegeId: 'col-a', status: SubmissionStatus.SUBMITTED },
+      where: { id: 'sub-1', collegeId: 'col-a', status: SubmissionStatus.SUBMITTED, updatedAt: new Date('2026-11-18T10:00:00.000Z') },
       data: { marksAwarded: 90, feedback: 'Good', status: SubmissionStatus.GRADED },
     });
+  });
+
+  it('refuses a grade for a version of the work the teacher did not see', async () => {
+    database.assignment.findFirst.mockResolvedValue(mockAssignment);
+    database.class.findFirst.mockResolvedValue(mockClass);
+    database.submission.findFirst.mockResolvedValue(mockSubmission);
+    // The student updated the work after the teacher opened it: same status, newer version.
+    const seen = parseGradeSubmissionDto({ marksAwarded: 5, version: '2026-11-18T09:00:00.000Z' });
+    await expect(service.gradeSubmission('ass-1', 'sub-1', seen, faculty)).rejects.toMatchObject({ response: { code: 'SUBMISSION_CHANGED' } });
+    expect(database.submission.updateMany).not.toHaveBeenCalled();
+    expect(() => parseGradeSubmissionDto({ marksAwarded: 5, version: 'yesterday' })).toThrow(BadRequestException);
   });
 
   it('grades only handed-in work, and not over a change made meanwhile', async () => {

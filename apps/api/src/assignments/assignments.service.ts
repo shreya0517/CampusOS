@@ -314,9 +314,12 @@ export class AssignmentsService {
       throw new ConflictException({ code: 'NOT_SUBMITTED', message: 'Only work that has been handed in can be graded.' });
     }
 
-    // Only if the student didn't change it since it was read.
+    // The grade applies only to the version of the work the teacher saw: a student can update work that isn't graded
+    // yet without changing its status, so the status alone doesn't show it changed. Without a version from the
+    // client, the one read here is used.
+    if (input.version && input.version.getTime() !== existing!.updatedAt.getTime()) submissionChanged();
     const written = await this.database.submission.updateMany({
-      where: { id: submissionId, collegeId: context.collegeId, status: existing!.status },
+      where: { id: submissionId, collegeId: context.collegeId, status: existing!.status, updatedAt: existing!.updatedAt },
       data: {
         marksAwarded: input.marksAwarded,
         feedback: input.feedback,

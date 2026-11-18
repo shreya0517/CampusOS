@@ -109,6 +109,8 @@ export default function AssignmentDetailPage() {
       const updated = await gradeSubmission(id, submissionId, {
         marksAwarded: Number(marksInput),
         feedback: feedbackInput.trim() || undefined,
+        // The version shown here, so a resubmission made since then isn't graded unseen.
+        version: submissions.find((s) => s.id === submissionId)?.updatedAt,
       });
       setSubmissions((prev) => prev.map((s) => (s.id === submissionId ? updated : s)));
       setGradingSubmissionId(null);

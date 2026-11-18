@@ -34,6 +34,8 @@ export type GradeSubmissionDto = {
   feedback?: string;
   /** GRADED (the default) or RETURNED for the student to hand in again. */
   status?: 'GRADED' | 'RETURNED';
+  /** The submission's updatedAt as the teacher saw it; the grade only applies to that version of the work. */
+  version?: Date;
 };
 
 type Body = Record<string, unknown>;
@@ -113,9 +115,12 @@ export const parseGradeSubmissionDto = (v: unknown): GradeSubmissionDto => {
   const b = object(v);
   const status = b.status === undefined ? undefined : string(b.status);
   if (status !== undefined && !GRADING_STATUSES.includes(status)) invalid();
+  const version = b.version === undefined ? undefined : new Date(string(b.version));
+  if (version && Number.isNaN(version.valueOf())) invalid();
   return {
     marksAwarded: number(b.marksAwarded, 0),
     feedback: optionalString(b.feedback),
     status: status as GradeSubmissionDto['status'],
+    version,
   };
 };

@@ -14,6 +14,8 @@ export type Submission = {
   fileKey: string | null;
   marksAwarded: number | null;
   feedback: string | null;
+  /** Changes whenever the submission does; sent back when grading so a newer version isn't graded unseen. */
+  updatedAt: string;
   student?: SubmissionStudent;
 };
 
@@ -54,6 +56,6 @@ export const listSubmissions = (id: string): Promise<Submission[]> => authentica
 export const gradeSubmission = (
   assignmentId: string,
   submissionId: string,
-  input: { marksAwarded: number; feedback?: string; status?: 'GRADED' | 'RETURNED' },
+  input: { marksAwarded: number; feedback?: string; status?: 'GRADED' | 'RETURNED'; version?: string },
 ): Promise<Submission> =>
   authenticatedRequest(`/assignments/${assignmentId}/submissions/${submissionId}/grade`, { method: 'PUT', body: JSON.stringify(input) });
