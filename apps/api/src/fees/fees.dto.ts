@@ -1,4 +1,13 @@
+import { BadRequestException } from '@nestjs/common';
 import { InvoiceStatus, PaymentMethod } from '@prisma/client';
+
+/** Bad input is the client's mistake: a 400 with the reason, not a plain Error that surfaced as a 500. */
+function invalid(message: string): never {
+  throw new BadRequestException({ code: 'INVALID_INPUT', message });
+}
+
+/** Methods Razorpay can take online. Cash and bank transfers are paid at the accounts office, not through an order. */
+export const ONLINE_METHODS: PaymentMethod[] = [PaymentMethod.ONLINE, PaymentMethod.UPI, PaymentMethod.CARD];
 
 export type CreateFeeStructureDto = {
   name: string;
@@ -40,16 +49,16 @@ export function parseCreateFeeStructureDto(body: unknown): CreateFeeStructureDto
   const b = (body ?? {}) as Record<string, unknown>;
 
   if (typeof b.name !== 'string' || !b.name.trim()) {
-    throw new Error('Fee structure name is required');
+    invalid('Fee structure name is required');
   }
 
   const amount = Number(b.amount);
   if (isNaN(amount) || amount <= 0) {
-    throw new Error('amount must be a positive number');
+    invalid('amount must be a positive number');
   }
 
   if (typeof b.activeFrom !== 'string' || isNaN(Date.parse(b.activeFrom))) {
-    throw new Error('Valid activeFrom date is required');
+    invalid('Valid activeFrom date is required');
   }
 
   let activeUntil: string | undefined;
@@ -72,12 +81,12 @@ export function parseCreateInvoiceDto(body: unknown): CreateInvoiceDto {
   const b = (body ?? {}) as Record<string, unknown>;
 
   if (typeof b.studentId !== 'string' || !b.studentId.trim()) {
-    throw new Error('studentId is required');
+    invalid('studentId is required');
   }
 
   const amountDue = Number(b.amountDue);
   if (isNaN(amountDue) || amountDue <= 0) {
-    throw new Error('amountDue must be a positive number');
+    invalid('amountDue must be a positive number');
   }
 
   let dueOn: string | undefined;
@@ -97,15 +106,14 @@ export function parseCreateRazorpayOrderDto(body: unknown): CreateRazorpayOrderD
   const b = (body ?? {}) as Record<string, unknown>;
 
   if (typeof b.invoiceId !== 'string' || !b.invoiceId.trim()) {
-    throw new Error('invoiceId is required');
+    invalid('invoiceId is required');
   }
 
   let method: PaymentMethod = PaymentMethod.ONLINE;
-  if (typeof b.method === 'string') {
-    const m = b.method.toUpperCase();
-    if (Object.values(PaymentMethod).includes(m as PaymentMethod)) {
-      method = m as PaymentMethod;
-    }
+  if (b.method !== undefined && b.method !== null && b.method !== '') {
+    const m = typeof b.method === 'string' ? b.method.toUpperCase() : '';
+    if (!ONLINE_METHODS.includes(m as PaymentMethod)) invalid('An online payment must use ONLINE, UPI or CARD.');
+    method = m as PaymentMethod;
   }
 
   return {
@@ -118,16 +126,16 @@ export function parseVerifyRazorpayPaymentDto(body: unknown): VerifyRazorpayPaym
   const b = (body ?? {}) as Record<string, unknown>;
 
   if (typeof b.paymentId !== 'string' || !b.paymentId.trim()) {
-    throw new Error('paymentId is required');
+    invalid('paymentId is required');
   }
   if (typeof b.razorpayOrderId !== 'string' || !b.razorpayOrderId.trim()) {
-    throw new Error('razorpayOrderId is required');
+    invalid('razorpayOrderId is required');
   }
   if (typeof b.razorpayPaymentId !== 'string' || !b.razorpayPaymentId.trim()) {
-    throw new Error('razorpayPaymentId is required');
+    invalid('razorpayPaymentId is required');
   }
   if (typeof b.razorpaySignature !== 'string' || !b.razorpaySignature.trim()) {
-    throw new Error('razorpaySignature is required');
+    invalid('razorpaySignature is required');
   }
 
   return {
@@ -144,7 +152,7 @@ export function parseFeesListQuery(query: unknown): FeesListQuery {
   const pageSize = q.pageSize ? Number(q.pageSize) : 20;
 
   if (!Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) {
-    throw new Error('Invalid pagination parameters');
+    invalid('Invalid pagination parameters');
   }
 
   let status: InvoiceStatus | undefined;

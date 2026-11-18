@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
-import { createHmac } from 'crypto';
+import { createHmac, randomBytes } from 'crypto';
 import { InvoiceStatus, PaymentMethod, PaymentStatus } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { DatabaseService } from '../database.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
 import type {
@@ -19,6 +20,27 @@ const denied = (): never => {
 };
 const invoiceMissing = (): never => {
   throw new NotFoundException({ code: 'INVOICE_NOT_FOUND', message: 'Invoice was not found in this college.' });
+};
+
+/** Invoices a student can pay online: issued and not yet fully paid. Draft invoices aren't issued yet; void ones are cancelled. */
+const PAYABLE: InvoiceStatus[] = [InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.OVERDUE];
+
+/**
+ * A document number such as INV-2026-3FA9C1B2D4. Ten random hex characters make a clash practically impossible, so
+ * the unique constraint on invoice and receipt numbers never turns a payment into a 500 (six random digits could).
+ */
+const documentNumber = (prefix: 'INV' | 'REC'): string => `${prefix}-${new Date().getFullYear()}-${randomBytes(5).toString('hex').toUpperCase()}`;
+
+const isUniqueViolation = (error: unknown): boolean => typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'P2002';
+
+const notPending = (): never => {
+  throw new ConflictException({ code: 'PAYMENT_NOT_PENDING', message: 'This payment has already been processed.' });
+};
+
+/** What has been paid on an invoice so far: its completed payments. */
+const paidSoFar = async (client: Pick<Prisma.TransactionClient, 'payment'>, collegeId: string, invoiceId: string): Promise<number> => {
+  const paid = await client.payment.aggregate({ where: { collegeId, invoiceId, status: PaymentStatus.COMPLETED }, _sum: { amount: true } });
+  return Number(paid._sum.amount ?? 0);
 };
 
 /** Without a Razorpay secret, outside production, payments run in a test mode that accepts simulated signatures. */
@@ -109,7 +131,7 @@ export class FeesService {
       throw new NotFoundException({ code: 'STUDENT_NOT_FOUND', message: 'Student profile was not found.' });
     }
 
-    const invoiceNumber = `INV-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
+    const invoiceNumber = documentNumber('INV');
 
     return this.database.invoice.create({
       data: {
@@ -229,6 +251,17 @@ export class FeesService {
     if (invoice.status === InvoiceStatus.PAID) {
       throw new BadRequestException({ code: 'INVOICE_ALREADY_PAID', message: 'Invoice has already been paid.' });
     }
+    if (!PAYABLE.includes(invoice.status)) {
+      throw new ConflictException({
+        code: 'INVOICE_NOT_PAYABLE',
+        message: invoice.status === InvoiceStatus.VOID ? 'This invoice was cancelled and cannot be paid.' : 'This invoice has not been issued yet.',
+      });
+    }
+    // The order is for what is still owed, so an earlier part-payment is never charged again.
+    const balance = Number(invoice.amountDue) - (await paidSoFar(this.database, context.collegeId, invoice.id));
+    if (balance <= 0) {
+      throw new BadRequestException({ code: 'INVOICE_ALREADY_PAID', message: 'Invoice has already been paid.' });
+    }
 
     const razorpayOrderId = `order_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -236,8 +269,8 @@ export class FeesService {
       data: {
         collegeId: context.collegeId,
         invoiceId: invoice.id,
-        amount: invoice.amountDue,
-        method: input.method || PaymentMethod.ONLINE,
+        amount: balance,
+        method: input.method ?? PaymentMethod.ONLINE,
         status: PaymentStatus.PENDING,
         transactionRef: razorpayOrderId,
       },
@@ -248,7 +281,7 @@ export class FeesService {
     return {
       paymentId: payment.id,
       razorpayOrderId,
-      amount: Number(invoice.amountDue),
+      amount: balance,
       currency: 'INR',
       keyId,
       invoiceNumber: invoice.invoiceNumber,
@@ -267,12 +300,18 @@ export class FeesService {
     if (!payment) {
       throw new NotFoundException({ code: 'PAYMENT_NOT_FOUND', message: 'Payment record was not found.' });
     }
+    // Only a pending payment is settled: a completed or failed one can't be flipped by verifying it again.
+    if (payment.status !== PaymentStatus.PENDING) notPending();
+    // The signature covers the order, so it must be the order this payment was created for.
+    if (input.razorpayOrderId !== payment.transactionRef) {
+      throw new BadRequestException({ code: 'ORDER_MISMATCH', message: 'This payment was not made for that order.' });
+    }
 
     // A real Razorpay signature is checked against the configured secret. The simulated test signature is only
-    // accepted in test mode (outside production, with no secret configured); before, it was accepted everywhere.
+    // accepted in test mode (outside production, with no secret configured).
     const secret = process.env.RAZORPAY_KEY_SECRET;
     const expectedSignature = secret
-      ? createHmac('sha256', secret).update(`${input.razorpayOrderId}|${input.razorpayPaymentId}`).digest('hex')
+      ? createHmac('sha256', secret).update(`${payment.transactionRef}|${input.razorpayPaymentId}`).digest('hex')
       : null;
 
     const isValidSignature =
@@ -280,8 +319,8 @@ export class FeesService {
       (paymentsInTestMode() && input.razorpaySignature === `test_sig_${input.razorpayPaymentId}`);
 
     if (!isValidSignature) {
-      await this.database.payment.update({
-        where: { id: payment.id },
+      await this.database.payment.updateMany({
+        where: { id: payment.id, collegeId: context.collegeId, status: PaymentStatus.PENDING },
         data: { status: PaymentStatus.FAILED },
       });
       throw new BadRequestException({
@@ -290,47 +329,43 @@ export class FeesService {
       });
     }
 
-    // Mark payment completed & invoice paid in a transaction
-    return this.database.$transaction(async (tx) => {
-      const updatedPayment = await tx.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: PaymentStatus.COMPLETED,
-          transactionRef: input.razorpayPaymentId,
-          paidAt: new Date(),
-        },
-      });
+    const now = new Date();
+    return this.settle(payment, input.razorpayPaymentId, now, context).catch((error: unknown) => {
+      // A Razorpay payment id is unique per college, so one payment can never be counted against two orders.
+      if (isUniqueViolation(error)) throw new ConflictException({ code: 'PAYMENT_ALREADY_RECORDED', message: 'This Razorpay payment has already been recorded.' });
+      throw error;
+    });
+  }
 
+  /** Completes a pending payment, updates its invoice and issues the receipt, all in one transaction. */
+  private settle(payment: { id: string; invoiceId: string; invoice: { amountDue: Prisma.Decimal | number } }, razorpayPaymentId: string, now: Date, context: AuthorizationContext) {
+    return this.database.$transaction(async (tx) => {
+      // Settle it only if it is still pending, so two verifications of one payment can't both complete it.
+      const settled = await tx.payment.updateMany({
+        where: { id: payment.id, collegeId: context.collegeId, status: PaymentStatus.PENDING },
+        data: { status: PaymentStatus.COMPLETED, transactionRef: razorpayPaymentId, paidAt: now },
+      });
+      if (settled.count !== 1) notPending();
+
+      // Lock the invoice before adding up its payments, so two payments settling together see each other.
+      await tx.invoice.updateMany({ where: { id: payment.invoiceId, collegeId: context.collegeId }, data: { updatedAt: now } });
+      const paid = await paidSoFar(tx, context.collegeId, payment.invoiceId);
       await tx.invoice.update({
         where: { id: payment.invoiceId },
-        data: {
-          status: InvoiceStatus.PAID,
-        },
+        data: { status: paid >= Number(payment.invoice.amountDue) ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID },
       });
 
-      const existingReceipt = await tx.receipt.findFirst({
-        where: { collegeId: context.collegeId, paymentId: payment.id },
+      const receipt = await tx.receipt.create({
+        data: { collegeId: context.collegeId, paymentId: payment.id, receiptNumber: documentNumber('REC'), issuedAt: now },
       });
-
-      let receipt = existingReceipt;
-      if (!receipt) {
-        const receiptNumber = `REC-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
-        receipt = await tx.receipt.create({
-          data: {
-            collegeId: context.collegeId,
-            paymentId: payment.id,
-            receiptNumber,
-            issuedAt: new Date(),
-          },
-        });
-      }
+      const updatedPayment = await tx.payment.findUniqueOrThrow({ where: { id: payment.id } });
 
       return {
         success: true,
         payment: updatedPayment,
         receipt,
       };
-    });
+    }, { timeout: 30_000 });
   }
 
   async getReceipts(context: AuthorizationContext) {
