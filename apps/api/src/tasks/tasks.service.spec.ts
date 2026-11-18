@@ -1,5 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { TasksService, taskStatusFrom } from './tasks.service';
+import { REQUIRED_ROLES } from '../authorization/authorization.decorator';
+import { TasksController } from './tasks.controller';
 import type { DatabaseService } from '../database.service';
 import type { EventsService } from '../events/events.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
@@ -490,5 +492,14 @@ describe('TasksService assignment boundaries', () => {
     database.user.findFirst.mockResolvedValue({ facultyProfiles: [{ departmentId: 'dept-1' }] });
     database.taskAssignment.create.mockRejectedValue({ code: 'P2002' });
     await expect(service.assignTask('task-1', { assigneeUserId: 'own-faculty' }, hod)).rejects.toMatchObject({ response: { code: 'ALREADY_ASSIGNED' } });
+  });
+});
+
+describe('TasksController roles', () => {
+  it('keeps every task read to staff', () => {
+    const roles = (handler: keyof TasksController) => Reflect.getMetadata(REQUIRED_ROLES, TasksController.prototype[handler]);
+    for (const handler of ['listTasks', 'listMyAssignments', 'getMyAssignmentStats', 'getTask'] as const) {
+      expect(roles(handler)).toEqual(['ADMIN', 'HOD', 'FACULTY']);
+    }
   });
 });
