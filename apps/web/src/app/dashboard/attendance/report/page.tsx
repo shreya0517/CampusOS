@@ -145,7 +145,7 @@ export default function AttendanceReportPage() {
               tone={report.overall.belowThreshold ? 'text-rose-600 dark:text-rose-400' : ''}
             />
             <Figure label="Sessions recorded" value={report.sessions} sub={`${report.range.from} to ${report.range.to}`} />
-            <Figure label="Students short" value={report.shortages.length} sub={`Under ${report.threshold}% in this period`} tone={report.shortages.length ? 'text-rose-600 dark:text-rose-400' : ''} />
+            <Figure label="Students short" value={report.shortageTotal} sub={`Under ${report.threshold}% in this period`} tone={report.shortageTotal ? 'text-rose-600 dark:text-rose-400' : ''} />
             <Figure label="Classes short" value={classesShort} sub={`of ${report.byClass.length} classes`} tone={classesShort ? 'text-amber-600 dark:text-amber-400' : ''} />
           </div>
 
@@ -252,7 +252,10 @@ export default function AttendanceReportPage() {
             <CardHeader className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <CardTitle>Attendance shortages</CardTitle>
-                <CardDescription>Students under {report.threshold}% in this period, lowest first.</CardDescription>
+                <CardDescription>
+                  Students under {report.threshold}% in this period, lowest first.
+                  {report.shortagesTruncated && ` Showing the ${report.shortages.length} lowest of ${report.shortageTotal}; narrow the range or pick a department to see the rest. The export holds the listed students.`}
+                </CardDescription>
               </div>
               {report.shortages.length > 0 && (
                 <Button variant="outline" onClick={exportShortages}>

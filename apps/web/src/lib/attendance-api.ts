@@ -66,5 +66,8 @@ export type AttendanceReport = {
   })[];
   byMonth: (AttendanceSummary & { month: string })[];
   shortages: (AttendanceSummary & { student: { id: string; studentCode: string; name: string }; section: string | null })[];
+  /** Students short in all; `shortages` holds at most 500 of them, lowest first. */
+  shortageTotal: number;
+  shortagesTruncated: boolean;
 };
 export const getAttendanceReport = (q: URLSearchParams): Promise<AttendanceReport> => authenticatedRequest(`/attendance/report?${q}`);

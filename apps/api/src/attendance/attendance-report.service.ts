@@ -91,11 +91,11 @@ export class AttendanceReportService {
     // Students under the threshold, worst first.
     const perStudent = new Map<string, Tally>();
     for (const row of byStudent) add(perStudent, row.studentId, row.status, row._count._all);
-    const short = [...perStudent.entries()]
+    const allShort = [...perStudent.entries()]
       .map(([studentId, tally]) => ({ studentId, summary: summarize(tally) }))
       .filter((entry) => entry.summary.belowThreshold)
-      .sort((a, b) => (a.summary.percentage ?? 0) - (b.summary.percentage ?? 0))
-      .slice(0, SHORTAGE_LIMIT);
+      .sort((a, b) => (a.summary.percentage ?? 0) - (b.summary.percentage ?? 0));
+    const short = allShort.slice(0, SHORTAGE_LIMIT);
     const students = short.length
       ? await this.database.student.findMany({
           where: { collegeId, id: { in: short.map((entry) => entry.studentId) } },
@@ -134,6 +134,9 @@ export class AttendanceReportService {
           ...summarize(perClass.get(cls.id) ?? emptyTally()),
         }))
         .sort((a, b) => a.subject.name.localeCompare(b.subject.name) || a.section.code.localeCompare(b.section.code)),
+      // The list is capped; these say how many students are short in all, and whether the list is cut.
+      shortageTotal: allShort.length,
+      shortagesTruncated: allShort.length > short.length,
       byMonth: [...perMonth.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, tally]) => ({ month, ...summarize(tally) })),
       shortages: short.map(({ studentId, summary }) => {
         const student = studentById.get(studentId);

@@ -204,6 +204,6 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
   - Dates are YYYY-MM-DD. Without them the report covers the last 30 days, ending today in the college's timezone. A range over 366 days returns 400 RANGE_TOO_LONG.
   - Returns `range`, `threshold` (75), `sessions` recorded in the range, and the `overall` summary.
   - It also returns `byDepartment`, `byClass` (subject, section, faculty, sessions) and `byMonth` (YYYY-MM).
-  - `shortages` lists students under the threshold, lowest first, up to 500, with their active section.
+  - `shortages` lists students under the threshold, lowest first, up to 500, with their active section. `shortageTotal` is how many are short in all, and `shortagesTruncated` says whether the list was cut.
   - Summaries follow the student attendance rules: late counts as attended and excused sessions are left out.
 - Admin decision 2: POST /api/v1/attendance and PUT /api/v1/attendance/:id are HOD and FACULTY only. Admin reads sessions, history and the report but doesn't mark or correct. Faculty correct within 48 hours; the HOD corrects after that.

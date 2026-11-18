@@ -18,10 +18,11 @@ function formatDate(iso: string): string {
 }
 
 export default function AttendancePage() {
-  const { primaryRole } = useAuth();
+  const { primaryRole, user } = useAuth();
   // Admin decision 2: Admin monitors attendance (the report) but faculty and HODs record it.
   const canMarkAttendance = primaryRole === 'HOD' || primaryRole === 'Faculty';
-  const canSeeReport = primaryRole === 'Admin' || primaryRole === 'HOD';
+  // The report API admits ADMIN and HOD only, so check the real roles (a super-admin also shows as "Admin").
+  const canSeeReport = Boolean(user?.roles?.some((role) => role === 'ADMIN' || role === 'HOD'));
 
   const [sessions, setSessions] = useState<AttendanceSession[]>([]);
   const [total, setTotal] = useState(0);

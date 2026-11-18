@@ -79,6 +79,8 @@ describe('AttendanceReportService', () => {
       ['2026-10', 50],
       ['2026-11', 60],
     ]);
+    expect(report.shortageTotal).toBe(1);
+    expect(report.shortagesTruncated).toBe(false);
     expect(report.shortages).toEqual([
       expect.objectContaining({ student: { id: 'stu-2', studentCode: 'S-2', name: 'Nisha Rao' }, section: 'CSE · BTECH · Semester 1 · A', percentage: 25 }),
     ]);
