@@ -287,7 +287,7 @@ describe('TasksService WebSocket Event Emissions', () => {
       await service.submitTask('assign-1', { content: 'All graded' }, facultyContext);
 
       expect(mockDatabase.taskAssignment.updateMany).toHaveBeenCalledWith({
-        where: { id: 'assign-1', collegeId: 'college-1', assigneeUserId: 'faculty-1', status: { in: [TaskStatus.IN_PROGRESS, TaskStatus.REWORK] } },
+        where: { id: 'assign-1', collegeId: 'college-1', assigneeUserId: 'faculty-1', status: TaskStatus.IN_PROGRESS },
         data: { status: TaskStatus.SUBMITTED, submissionContent: 'All graded', submittedAt: expect.any(Date) },
       });
       // Every attempt is kept, since a resubmission replaces the stored content.

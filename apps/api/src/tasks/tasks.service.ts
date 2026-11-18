@@ -318,9 +318,10 @@ export class TasksService {
 
     const now = new Date();
     await this.database.$transaction(async (tx) => {
-      // Only from in progress or rework, checked again in the write, so approved work can't be reopened by submitting.
+      // Only from the state that was read (in progress or rework), so approved work can't be reopened by submitting,
+      // and a submission that was reviewed in the meantime (for example sent back for rework) isn't resubmitted unseen.
       const written = await tx.taskAssignment.updateMany({
-        where: { id: assignmentId, collegeId: context.collegeId, assigneeUserId: context.userId, status: { in: SUBMITTABLE } },
+        where: { id: assignmentId, collegeId: context.collegeId, assigneeUserId: context.userId, status: existing!.status },
         data: { status: TaskStatus.SUBMITTED, submissionContent: input.content, submittedAt: now },
       });
       if (written.count !== 1) statusChanged();
