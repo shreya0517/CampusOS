@@ -197,6 +197,13 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
   - POST /api/v1/tasks/assignments/:id/submit: only from IN_PROGRESS or REWORK (409 INVALID_STATUS_TRANSITION otherwise), so approved work can't be reopened. Each submission writes a TASK_SUBMITTED audit entry with its content, since a resubmission replaces the stored content.
   - PUT /api/v1/tasks/assignments/:id/review: only while SUBMITTED. The reviewer's notes go in `reviewNotes`, leaving the instructions in `notes`, and each review writes a TASK_REVIEWED audit entry with the decision and notes.
   - Every one of these writes applies only if the assignment is still in the state it was read in. Otherwise it returns 409 TASK_STATUS_CHANGED, so two reviewers, or a review and a resubmission, can't overwrite each other.
+- A task's `status` sums up its assignments, and is worked out again whenever one is assigned, started, submitted or reviewed (with the task row locked):
+  - APPROVED once every assignment is approved;
+  - SUBMITTED while any waits for review;
+  - REWORK while any was sent back;
+  - IN_PROGRESS once anyone has started, or some but not all are approved;
+  - otherwise PENDING.
+  - Migration `task_status_backfill` applies the same rule once to existing tasks.
 - Editing a task (PUT /api/v1/tasks/:id) sends `task:updated` to Admins, the department's HODs and everyone assigned to it (docs/websocket.md).
 - GET /api/v1/visitors, GET /api/v1/visitors/:id and PUT /api/v1/visitors/:id/review: an HOD only reaches visitors whose host is in their department, or, when no host is named, whose registrant is in it (404 otherwise). Only PENDING requests can be reviewed, atomically, so a second concurrent decision gets 409 VISITOR_ALREADY_REVIEWED. ADMIN reaches every visitor in the college.
 - GET /api/v1/timetable: HOD lists only their department's timetable; FACULTY lists only the classes they teach; STUDENT lists only their own sections.

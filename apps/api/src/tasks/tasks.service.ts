@@ -21,6 +21,20 @@ const denied = (): never => {
 const taskMissing = (): never => {
   throw new NotFoundException({ code: 'TASK_NOT_FOUND', message: 'Task was not found.' });
 };
+/**
+ * A task's status sums up its assignments, so the badge on the task means something: approved once everyone's work
+ * is approved; submitted while any work waits for review; rework while any was sent back; in progress once anyone
+ * has started (or some, but not all, are approved); otherwise pending.
+ */
+export const taskStatusFrom = (statuses: TaskStatus[]): TaskStatus => {
+  if (statuses.length === 0) return TaskStatus.PENDING;
+  if (statuses.every((status) => status === TaskStatus.APPROVED)) return TaskStatus.APPROVED;
+  if (statuses.includes(TaskStatus.SUBMITTED)) return TaskStatus.SUBMITTED;
+  if (statuses.includes(TaskStatus.REWORK)) return TaskStatus.REWORK;
+  if (statuses.some((status) => status === TaskStatus.IN_PROGRESS || status === TaskStatus.APPROVED)) return TaskStatus.IN_PROGRESS;
+  return TaskStatus.PENDING;
+};
+
 /** Work can be submitted while in progress, or again after it was returned for rework. */
 const SUBMITTABLE: TaskStatus[] = [TaskStatus.IN_PROGRESS, TaskStatus.REWORK];
 const statusChanged = (): never => {
@@ -245,6 +259,7 @@ export class TasksService {
       }
       throw error;
     }
+    await this.syncTaskStatus(taskId, context.collegeId);
 
     this.events.emitTaskAssigned(
       this.buildPayload(task, context, `Task assigned: ${(task as { title?: string }).title ?? taskId}`, {
@@ -291,6 +306,7 @@ export class TasksService {
       data: { status: input.status },
     });
     if (written.count !== 1) statusChanged();
+    await this.syncTaskStatus(existing!.taskId, context.collegeId);
     const updated = await this.database.taskAssignment.findUniqueOrThrow({ where: { id: assignmentId }, include: assignmentInclude });
 
     if (input.status === TaskStatus.IN_PROGRESS) {
@@ -330,6 +346,7 @@ export class TasksService {
         data: { collegeId: context.collegeId, actorId: context.userId, action: 'TASK_SUBMITTED', entityType: 'TaskAssignment', entityId: assignmentId, metadata: { taskId: existing!.taskId, content: input.content } },
       });
     });
+    await this.syncTaskStatus(existing!.taskId, context.collegeId);
     const updated = await this.database.taskAssignment.findUniqueOrThrow({ where: { id: assignmentId }, include: assignmentInclude });
 
     this.events.emitTaskSubmitted(
@@ -388,6 +405,7 @@ export class TasksService {
         data: { collegeId: context.collegeId, actorId: context.userId, action: 'TASK_REVIEWED', entityType: 'TaskAssignment', entityId: assignmentId, metadata: { taskId: existing!.taskId, decision: input.decision, notes: input.notes ?? null } },
       });
     });
+    await this.syncTaskStatus(existing!.taskId, context.collegeId);
     const updated = await this.database.taskAssignment.findUniqueOrThrow({ where: { id: assignmentId }, include: assignmentInclude });
 
     this.events.emitTaskReviewed(
@@ -434,6 +452,18 @@ export class TasksService {
       count(TaskStatus.REWORK),
     ]);
     return { pending, inProgress, submitted, approved, rework, total: pending + inProgress + submitted + approved + rework };
+  }
+
+  /**
+   * Works the task's status out again from its assignments after one of them changed. The task row is locked first,
+   * so two changes at the same moment can't leave the status computed by whichever read first.
+   */
+  private async syncTaskStatus(taskId: string, collegeId: string): Promise<void> {
+    await this.database.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Task" WHERE id = ${taskId} AND "collegeId" = ${collegeId} FOR UPDATE`;
+      const assignments = await tx.taskAssignment.findMany({ where: { collegeId, taskId }, select: { status: true } });
+      await tx.task.updateMany({ where: { id: taskId, collegeId }, data: { status: taskStatusFrom(assignments.map((assignment) => assignment.status)) } });
+    });
   }
 
   /* ─── Event payload builder ──────────────────────────────────────────── */
