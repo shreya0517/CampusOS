@@ -207,3 +207,31 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
   - `shortages` lists students under the threshold, lowest first, up to 500, with their active section. `shortageTotal` is how many are short in all, and `shortagesTruncated` says whether the list was cut.
   - Summaries follow the student attendance rules: late counts as attended and excused sessions are left out.
 - Admin decision 2: POST /api/v1/attendance and PUT /api/v1/attendance/:id are HOD and FACULTY only. Admin reads sessions, history and the report but doesn't mark or correct. Faculty correct within 48 hours; the HOD corrects after that.
+
+## Notifications
+
+Every signed-in user (ADMIN, HOD, FACULTY, STUDENT) reads and marks only their own notifications; the user always comes from the session.
+
+- GET /api/v1/notifications?category=&unread=true&page=&pageSize=: newest first, with `total` and the caller's `unread` count. Categories: TASK, ATTENDANCE, EXAM, ASSIGNMENT, FEE, VISITOR, ANNOUNCEMENT, ACCOUNT, SYSTEM.
+- GET /api/v1/notifications/unread-count: `{ unread }`.
+- PUT /api/v1/notifications/:id/read: marks one as read and returns the new `unread` count. Someone else's notification returns 404.
+- PUT /api/v1/notifications/read-all?category=: marks all (or one category) as read.
+- Each notification has `category`, `title`, `body`, `link` (an in-app path to the related record), `readAt` and `createdAt`. When one is stored, the server also emits `notification:new` to the recipient's socket room.
+
+Raised today:
+
+| Event | Who is notified |
+| --- | --- |
+| Task assigned | The assignee |
+| Task submitted | The task's creator |
+| Task approved or returned | The assignee |
+| Visitor registered | Every Admin, and the HOD of the host's department (or of the registrant's when no host) |
+| Visitor approved or rejected | Whoever registered the visitor |
+| Marks submitted | The HOD of the paper's department, or every Admin when it has no HOD |
+| Marks approved or returned | Whoever submitted them |
+| Results published | Students with a result |
+| Assignment submitted (not a draft) | The faculty member teaching the class |
+| Assignment graded or returned | The student |
+| Announcement published now | Everyone in its audience (scheduled ones are not announced: there is no scheduler yet) |
+
+The actor is never notified about their own action. Storing notifications never fails or undoes the action that raised them; errors are logged.
