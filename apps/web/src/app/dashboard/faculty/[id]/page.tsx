@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { ErrorState, Skeleton } from '@/components/feedback/states';
-import { TemporaryPasswordNotice } from '@/components/faculty/temporary-password-notice';
+import { TemporaryPasswordNotice } from '@/components/accounts/temporary-password-notice';
 import { AccountBadge } from '@/components/students/account-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -175,7 +175,7 @@ export default function FacultyDetailPage() {
               <CardDescription>Deactivating signs the person out everywhere and blocks sign-in; their records stay.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
-              {issued && <TemporaryPasswordNotice email={issued.email} password={issued.password} />}
+              {issued && <TemporaryPasswordNotice email={issued.email} password={issued.password} who="the faculty member" />}
               {faculty.account ? (
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="text-sm">
