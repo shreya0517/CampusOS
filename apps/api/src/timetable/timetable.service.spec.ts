@@ -35,7 +35,10 @@ describe('TimetableService', () => {
     enrollment: {
       findMany: jest.fn(),
     },
+    $executeRaw: jest.fn().mockResolvedValue(1),
+    $transaction: jest.fn(),
   };
+  database.$transaction.mockImplementation((work: (tx: typeof database) => Promise<unknown>) => work(database));
 
   let service: TimetableService;
 
@@ -45,6 +48,21 @@ describe('TimetableService', () => {
   });
 
   describe('createEntry', () => {
+    it('checks for clashes and inserts under a per-college lock', async () => {
+      database.class.findFirst.mockResolvedValue({ id: 'cls-1', facultyId: 'fac-1', subject: { name: 'OS' }, faculty: null });
+      database.room.findFirst.mockResolvedValue({ id: 'room-1', name: 'Hall', code: 'R1' });
+      database.timetable.findMany.mockResolvedValue([]);
+      database.timetable.create.mockResolvedValue({ id: 'tt-1' });
+      const admin = { userId: 'admin', collegeId: 'col-a', roles: ['ADMIN'], permissions: [], departmentId: null } as never;
+      await service.createEntry(parseCreateTimetableDto({ classId: 'cls-1', roomId: 'room-1', dayOfWeek: 1, startsAt: '09:00', endsAt: '10:00' }), admin);
+      expect(database.$transaction).toHaveBeenCalled();
+      const lock = (database.$executeRaw.mock.calls[0] as [string[], ...unknown[]]);
+      expect(lock[0].join('?')).toContain('pg_advisory_xact_lock');
+      expect(lock[1]).toBe('timetable:col-a');
+      // The lock is taken before the clash check reads the day's entries.
+      expect(database.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(database.timetable.findMany.mock.invocationCallOrder[0]!);
+    });
+
     it('throws ForbiddenException if user is a student', async () => {
       const dto = parseCreateTimetableDto({
         classId: 'cls-1',

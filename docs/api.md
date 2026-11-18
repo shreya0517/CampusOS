@@ -205,6 +205,7 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 - GET /api/v1/timetable: HOD lists only their department's timetable; FACULTY lists only the classes they teach; STUDENT lists only their own sections.
 - GET /api/v1/timetable/me: STUDENT gets their sections; FACULTY and HOD get the classes they teach; ADMIN gets the whole college.
 - POST /api/v1/timetable and DELETE /api/v1/timetable/:id: ADMIN only (HOD decision 3).
+  - Creating an entry checks for room, class and teacher clashes, then inserts, in one transaction under a per-college lock. Two entries made at the same moment can't both pass the check: the second gets the usual 409 TIMETABLE_*_CONFLICT.
 
 ## Fees Access
 

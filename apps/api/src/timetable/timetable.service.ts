@@ -84,78 +84,82 @@ export class TimetableService {
     const startDate = parseTimeToDate(input.startsAt);
     const endDate = parseTimeToDate(input.endsAt);
 
-    // Fetch all existing entries for the same college and day to check conflicts in memory or via query
-    const dayEntries = await this.database.timetable.findMany({
-      where: {
-        collegeId: context.collegeId,
-        dayOfWeek: input.dayOfWeek,
-      },
-      include: {
-        class: {
-          include: {
-            faculty: FACULTY_NAME,
-            subject: true,
-          },
+    // The clash check and the insert run in one transaction under a per-college lock, so two entries made at the same
+    // moment can't both pass the check and double-book a room, class or teacher.
+    return this.database.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`timetable:${context.collegeId}`}))`;
+      const dayEntries = await tx.timetable.findMany({
+        where: {
+          collegeId: context.collegeId,
+          dayOfWeek: input.dayOfWeek,
         },
-        room: true,
-      },
-    });
-
-    for (const entry of dayEntries) {
-      const entryStart = timeToMinutes(entry.startsAt);
-      const entryEnd = timeToMinutes(entry.endsAt);
-
-      const overlaps = startMinutes < entryEnd && endMinutes > entryStart;
-      if (!overlaps) continue;
-
-      if (entry.roomId === input.roomId) {
-        throw new ConflictException({
-          code: 'TIMETABLE_ROOM_CONFLICT',
-          message: `Room "${room.name} (${room.code})" is already occupied during this time on this day.`,
-        });
-      }
-
-      if (entry.classId === input.classId) {
-        throw new ConflictException({
-          code: 'TIMETABLE_CLASS_CONFLICT',
-          message: `Class "${targetClass.subject.name}" is already scheduled for another session during this time on this day.`,
-        });
-      }
-
-      if (
-        targetClass.facultyId &&
-        entry.class.facultyId &&
-        targetClass.facultyId === entry.class.facultyId
-      ) {
-        const facultyName = targetClass.faculty
-          ? `${targetClass.faculty.firstName} ${targetClass.faculty.lastName}`
-          : 'The assigned faculty';
-        throw new ConflictException({
-          code: 'TIMETABLE_FACULTY_CONFLICT',
-          message: `${facultyName} is already teaching another class during this time on this day.`,
-        });
-      }
-    }
-
-    return this.database.timetable.create({
-      data: {
-        collegeId: context.collegeId,
-        classId: input.classId,
-        roomId: input.roomId,
-        dayOfWeek: input.dayOfWeek,
-        startsAt: startDate,
-        endsAt: endDate,
-      },
-      include: {
-        class: {
-          include: {
-            subject: true,
-            section: true,
-            faculty: FACULTY_NAME,
+        include: {
+          class: {
+            include: {
+              faculty: FACULTY_NAME,
+              subject: true,
+            },
           },
+          room: true,
         },
-        room: true,
-      },
+      });
+
+      for (const entry of dayEntries) {
+        const entryStart = timeToMinutes(entry.startsAt);
+        const entryEnd = timeToMinutes(entry.endsAt);
+
+        const overlaps = startMinutes < entryEnd && endMinutes > entryStart;
+        if (!overlaps) continue;
+
+        if (entry.roomId === input.roomId) {
+          throw new ConflictException({
+            code: 'TIMETABLE_ROOM_CONFLICT',
+            message: `Room "${room.name} (${room.code})" is already occupied during this time on this day.`,
+          });
+        }
+
+        if (entry.classId === input.classId) {
+          throw new ConflictException({
+            code: 'TIMETABLE_CLASS_CONFLICT',
+            message: `Class "${targetClass.subject.name}" is already scheduled for another session during this time on this day.`,
+          });
+        }
+
+        if (
+          targetClass.facultyId &&
+          entry.class.facultyId &&
+          targetClass.facultyId === entry.class.facultyId
+        ) {
+          const facultyName = targetClass.faculty
+            ? `${targetClass.faculty.firstName} ${targetClass.faculty.lastName}`
+            : 'The assigned faculty';
+          throw new ConflictException({
+            code: 'TIMETABLE_FACULTY_CONFLICT',
+            message: `${facultyName} is already teaching another class during this time on this day.`,
+          });
+        }
+      }
+
+      return tx.timetable.create({
+        data: {
+          collegeId: context.collegeId,
+          classId: input.classId,
+          roomId: input.roomId,
+          dayOfWeek: input.dayOfWeek,
+          startsAt: startDate,
+          endsAt: endDate,
+        },
+        include: {
+          class: {
+            include: {
+              subject: true,
+              section: true,
+              faculty: FACULTY_NAME,
+            },
+          },
+          room: true,
+        },
+      });
     });
   }
 
