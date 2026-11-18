@@ -134,8 +134,9 @@ export class VisitorsService {
     const visitor = await this.database.visitor.findFirst({ where: { id, collegeId: context.collegeId, ...(hodOnly ? this.hodScope(context) : {}) } });
     if (!visitor) visitorMissing();
     const now = new Date();
+    // The HOD's department scope is part of the write too, so it still holds if the host changed department meanwhile.
     const moved = await this.database.visitor.updateMany({
-      where: { id, collegeId: context.collegeId, status: from },
+      where: { id, collegeId: context.collegeId, status: from, ...(hodOnly ? this.hodScope(context) : {}) },
       data: to === VisitorStatus.CHECKED_IN ? { status: to, checkedInAt: now } : { status: to, checkedOutAt: now },
     });
     if (moved.count !== 1) {
@@ -176,7 +177,7 @@ export class VisitorsService {
 
     // Only a still-pending request is updated, so if two reviewers decide at once the second one gets a conflict.
     const decided = await this.database.visitor.updateMany({
-      where: { id, collegeId: context.collegeId, status: VisitorStatus.PENDING },
+      where: { id, collegeId: context.collegeId, status: VisitorStatus.PENDING, ...(hodOnly ? this.hodScope(context) : {}) },
       data: { status: newStatus, approvedByUserId: context.userId, approvedAt: new Date() },
     });
     if (decided.count !== 1) {

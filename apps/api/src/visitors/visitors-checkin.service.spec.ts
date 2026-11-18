@@ -41,6 +41,8 @@ describe('VisitorsService check-in and check-out', () => {
     await expect(service.checkIn('v1', admin)).rejects.toMatchObject({ response: { code: 'VISITOR_NOT_APPROVED' } });
     await service.checkIn('v1', hod);
     expect(database.visitor.findFirst).toHaveBeenCalledWith({ where: expect.objectContaining({ id: 'v1', collegeId: 'col-a', OR: expect.any(Array) }) });
+    // The scope is enforced in the write as well, not only in the read before it.
+    expect(database.visitor.updateMany).toHaveBeenLastCalledWith({ where: expect.objectContaining({ id: 'v1', status: 'APPROVED', OR: expect.any(Array) }), data: expect.any(Object) });
     await expect(service.checkIn('v1', faculty)).rejects.toBeInstanceOf(ForbiddenException);
   });
 

@@ -36,7 +36,8 @@ describe('VisitorsService department scope', () => {
     database.visitor.findFirst.mockResolvedValue({ id: 'v-1', status: VisitorStatus.PENDING });
     await service.reviewVisitor('v-1', { decision: 'APPROVED' }, hod);
     expect(database.visitor.updateMany).toHaveBeenCalledWith({
-      where: { id: 'v-1', collegeId: 'col-a', status: VisitorStatus.PENDING },
+      // An HOD's write also carries their department scope.
+      where: { id: 'v-1', collegeId: 'col-a', status: VisitorStatus.PENDING, OR: expect.any(Array) },
       data: expect.objectContaining({ status: VisitorStatus.APPROVED, approvedByUserId: 'hod-1' }),
     });
   });
