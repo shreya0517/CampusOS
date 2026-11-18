@@ -259,10 +259,10 @@ export class TasksService {
       }
       throw error;
     }
-    await this.syncTaskStatus(taskId, context.collegeId);
+    const taskStatus = await this.syncTaskStatus(taskId, context.collegeId);
 
     this.events.emitTaskAssigned(
-      this.buildPayload(task, context, `Task assigned: ${(task as { title?: string }).title ?? taskId}`, {
+      this.buildPayload({ ...task, status: taskStatus }, context, `Task assigned: ${(task as { title?: string }).title ?? taskId}`, {
         assignmentId: assignment.id,
         assigneeUserId: input.assigneeUserId,
       }),
@@ -306,12 +306,12 @@ export class TasksService {
       data: { status: input.status },
     });
     if (written.count !== 1) statusChanged();
-    await this.syncTaskStatus(existing!.taskId, context.collegeId);
+    const taskStatus = await this.syncTaskStatus(existing!.taskId, context.collegeId);
     const updated = await this.database.taskAssignment.findUniqueOrThrow({ where: { id: assignmentId }, include: assignmentInclude });
 
     if (input.status === TaskStatus.IN_PROGRESS) {
       this.events.emitTaskStarted(
-        this.buildPayload(existing!.task, context, `Task started: ${existing!.task.title}`, {
+        this.buildPayload({ ...existing!.task, status: taskStatus }, context, `Task started: ${existing!.task.title}`, {
           assignmentId,
           assigneeUserId: context.userId,
         }),
@@ -346,11 +346,11 @@ export class TasksService {
         data: { collegeId: context.collegeId, actorId: context.userId, action: 'TASK_SUBMITTED', entityType: 'TaskAssignment', entityId: assignmentId, metadata: { taskId: existing!.taskId, content: input.content } },
       });
     });
-    await this.syncTaskStatus(existing!.taskId, context.collegeId);
+    const taskStatus = await this.syncTaskStatus(existing!.taskId, context.collegeId);
     const updated = await this.database.taskAssignment.findUniqueOrThrow({ where: { id: assignmentId }, include: assignmentInclude });
 
     this.events.emitTaskSubmitted(
-      this.buildPayload(existing!.task, context, `Task submitted: ${existing!.task.title}`, {
+      this.buildPayload({ ...existing!.task, status: taskStatus }, context, `Task submitted: ${existing!.task.title}`, {
         assignmentId,
         assigneeUserId: context.userId,
       }),
@@ -405,11 +405,11 @@ export class TasksService {
         data: { collegeId: context.collegeId, actorId: context.userId, action: 'TASK_REVIEWED', entityType: 'TaskAssignment', entityId: assignmentId, metadata: { taskId: existing!.taskId, decision: input.decision, notes: input.notes ?? null } },
       });
     });
-    await this.syncTaskStatus(existing!.taskId, context.collegeId);
+    const taskStatus = await this.syncTaskStatus(existing!.taskId, context.collegeId);
     const updated = await this.database.taskAssignment.findUniqueOrThrow({ where: { id: assignmentId }, include: assignmentInclude });
 
     this.events.emitTaskReviewed(
-      this.buildPayload(existing!.task, context, `Task ${input.decision.toLowerCase()}: ${existing!.task.title}`, {
+      this.buildPayload({ ...existing!.task, status: taskStatus }, context, `Task ${input.decision.toLowerCase()}: ${existing!.task.title}`, {
         assignmentId,
         assigneeUserId: existing!.assigneeUserId,
       }),
@@ -455,14 +455,17 @@ export class TasksService {
   }
 
   /**
-   * Works the task's status out again from its assignments after one of them changed. The task row is locked first,
-   * so two changes at the same moment can't leave the status computed by whichever read first.
+   * Works the task's status out again from its assignments after one of them changed, and returns it for the event.
+   * The task row is locked first, so two changes at the same moment can't leave the status computed by whichever
+   * read first.
    */
-  private async syncTaskStatus(taskId: string, collegeId: string): Promise<void> {
-    await this.database.$transaction(async (tx) => {
+  private async syncTaskStatus(taskId: string, collegeId: string): Promise<TaskStatus> {
+    return this.database.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "Task" WHERE id = ${taskId} AND "collegeId" = ${collegeId} FOR UPDATE`;
       const assignments = await tx.taskAssignment.findMany({ where: { collegeId, taskId }, select: { status: true } });
-      await tx.task.updateMany({ where: { id: taskId, collegeId }, data: { status: taskStatusFrom(assignments.map((assignment) => assignment.status)) } });
+      const status = taskStatusFrom(assignments.map((assignment) => assignment.status));
+      await tx.task.updateMany({ where: { id: taskId, collegeId }, data: { status } });
+      return status;
     });
   }
 

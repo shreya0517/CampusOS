@@ -287,6 +287,7 @@ describe('TasksService WebSocket Event Emissions', () => {
         },
       };
       mockDatabase.taskAssignment.findFirst.mockResolvedValue({ ...existing, taskId: 'task-100' });
+      mockDatabase.taskAssignment.findMany.mockResolvedValueOnce([{ status: TaskStatus.SUBMITTED }]);
 
       await service.submitTask('assign-1', { content: 'All graded' }, facultyContext);
 
@@ -294,6 +295,8 @@ describe('TasksService WebSocket Event Emissions', () => {
         where: { id: 'assign-1', collegeId: 'college-1', assigneeUserId: 'faculty-1', status: TaskStatus.IN_PROGRESS },
         data: { status: TaskStatus.SUBMITTED, submissionContent: 'All graded', submittedAt: expect.any(Date) },
       });
+      // The event carries the status just worked out, not the one read before the change.
+      expect(mockEventsService.emitTaskSubmitted).toHaveBeenCalledWith(expect.objectContaining({ status: TaskStatus.SUBMITTED }), 'college-1', 'dept-1');
       // The task's status is worked out again from its assignments, with the task row locked.
       expect(mockDatabase.$queryRaw).toHaveBeenCalled();
       expect(mockDatabase.task.updateMany).toHaveBeenCalledWith({ where: { id: 'task-100', collegeId: 'college-1' }, data: { status: expect.any(String) } });
