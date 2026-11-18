@@ -122,6 +122,17 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
   - Body: { title (3-160 chars), body (1-5000 chars), audience? (ALL, STUDENTS, FACULTY or STAFF; default ALL), category? (GENERAL, ACADEMIC, EXAMINATION, HOLIDAY, EVENT or DEADLINE; default GENERAL), departmentId?, semesterNumber? (1-12), sectionId?, publishedAt?, expiresAt? }.
   - A section target also sets its department and semester; a department or semester given with it must match (400 TARGET_MISMATCH). An unknown section or department returns 404.
   - publishedAt defaults to now. A later publishedAt schedules the announcement. expiresAt must be after both the publishing time and now.
+- GET /api/v1/announcements/manage: ADMIN only. The announcement history: every announcement in the college, newest first, each with its `state`, plus `counts` per state.
+  - States: PUBLISHED, SCHEDULED (publish time still ahead), EXPIRED or ARCHIVED.
+  - Query: state?, category?, search?, page, pageSize.
+- PUT /api/v1/announcements/:id: ADMIN only. Body: the whole announcement, as for POST. Leaving out `expiresAt` clears it. A published announcement is not announced again after an edit.
+  - publishedAt can only change while the announcement hasn't been sent; otherwise 409 ALREADY_PUBLISHED. Moving a scheduled one to now or earlier publishes and announces it at once.
+  - The write only applies if the announcement hasn't been sent since it was read, so an edit can't race the scheduled delivery (409 ANNOUNCEMENT_CHANGED).
+  - Audited as ANNOUNCEMENT_UPDATED.
+- POST /api/v1/announcements/:id/archive and /restore: ADMIN only.
+  - An archived announcement is hidden from every list and is never delivered while archived. A restored one whose publish time has passed goes out at the next check, unless it has expired.
+  - Archiving twice returns 409 ALREADY_ARCHIVED, and restoring one that isn't archived returns 409 NOT_ARCHIVED.
+  - Audited as ANNOUNCEMENT_ARCHIVED and ANNOUNCEMENT_RESTORED.
 - Delivery: everyone the announcement is for gets a notification once, either when it is published or, if it was scheduled, by a check that runs every minute. `notifiedAt` records the delivery. Each delivery is claimed with a conditional update first, so it happens once even with several API instances. An announcement that expires before its time comes is not announced.
 
 ## Attendance and Marks Entry
