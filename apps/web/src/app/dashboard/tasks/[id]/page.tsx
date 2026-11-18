@@ -71,6 +71,11 @@ export default function TaskDetailPage() {
   const [actionError, setActionError] = useState<string | null>(null);
 
   const myAssignment = task?.assignments.find((a) => a.assigneeUserId === user?.id) ?? null;
+  // Tasks go to a person's sign-in account (its user id, not the faculty record's id), so only people with an
+  // active account can be picked, and nobody already on the task.
+  const assignable = faculty.filter(
+    (f) => f.userId && f.account?.status !== 'INACTIVE' && f.account?.status !== 'SUSPENDED' && !task?.assignments.some((a) => a.assigneeUserId === f.userId),
+  );
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -314,8 +319,8 @@ export default function TaskDetailPage() {
             onChange={(e) => setAssigneeId(e.target.value)}
           >
             <option value="" disabled>Select a person</option>
-            {faculty.map((f) => (
-              <option key={f.id} value={f.id}>
+            {assignable.map((f) => (
+              <option key={f.id} value={f.userId ?? ''}>
                 {f.firstName} {f.lastName} ({f.employeeCode})
               </option>
             ))}
