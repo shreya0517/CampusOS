@@ -1,6 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
 import { ExamStatus } from '@prisma/client';
 
+/** Bad input is the client's mistake: a 400 with the reason, not a plain Error that surfaced as a 500. */
+function invalid(message: string): never {
+  throw new BadRequestException({ code: 'INVALID_INPUT', message });
+}
+
 export type CreateExamDto = {
   name: string;
   status?: ExamStatus;
@@ -42,7 +47,7 @@ export function parseExamListQuery(query: unknown): ExamListQuery {
   const pageSize = q.pageSize ? Number(q.pageSize) : 20;
 
   if (!Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) {
-    throw new Error('Invalid pagination parameters');
+    invalid('Invalid pagination parameters');
   }
 
   const statusVal = typeof q.status === 'string' ? q.status.toUpperCase() : undefined;
@@ -59,13 +64,13 @@ export function parseExamListQuery(query: unknown): ExamListQuery {
 export function parseCreateExamDto(body: unknown): CreateExamDto {
   const b = (body ?? {}) as Record<string, unknown>;
   if (typeof b.name !== 'string' || !b.name.trim()) {
-    throw new Error('Exam name is required');
+    invalid('Exam name is required');
   }
   if (typeof b.startsOn !== 'string' || isNaN(Date.parse(b.startsOn))) {
-    throw new Error('Valid startsOn date is required');
+    invalid('Valid startsOn date is required');
   }
   if (typeof b.endsOn !== 'string' || isNaN(Date.parse(b.endsOn))) {
-    throw new Error('Valid endsOn date is required');
+    invalid('Valid endsOn date is required');
   }
 
   let status: ExamStatus | undefined;
@@ -84,25 +89,32 @@ export function parseCreateExamDto(body: unknown): CreateExamDto {
   };
 }
 
+/**
+ * An edit may leave fields out, but a field that is sent must be valid: a blank name, an unreadable date or an
+ * unknown status is a 400, not silently dropped (which would report success for a change that wasn't made).
+ */
 export function parseUpdateExamDto(body: unknown): UpdateExamDto {
   const b = (body ?? {}) as Record<string, unknown>;
   const result: UpdateExamDto = {};
 
-  if (typeof b.name === 'string' && b.name.trim()) {
+  if (b.name !== undefined) {
+    if (typeof b.name !== 'string' || !b.name.trim()) invalid('Exam name cannot be blank');
     result.name = b.name.trim();
   }
-  if (typeof b.startsOn === 'string' && !isNaN(Date.parse(b.startsOn))) {
+  if (b.startsOn !== undefined) {
+    if (typeof b.startsOn !== 'string' || isNaN(Date.parse(b.startsOn))) invalid('startsOn must be a valid date');
     result.startsOn = b.startsOn;
   }
-  if (typeof b.endsOn === 'string' && !isNaN(Date.parse(b.endsOn))) {
+  if (b.endsOn !== undefined) {
+    if (typeof b.endsOn !== 'string' || isNaN(Date.parse(b.endsOn))) invalid('endsOn must be a valid date');
     result.endsOn = b.endsOn;
   }
-  if (typeof b.status === 'string') {
-    const s = b.status.toUpperCase();
-    if (Object.values(ExamStatus).includes(s as ExamStatus)) {
-      result.status = s as ExamStatus;
-    }
+  if (b.status !== undefined) {
+    const s = typeof b.status === 'string' ? b.status.toUpperCase() : '';
+    if (!Object.values(ExamStatus).includes(s as ExamStatus)) invalid('status is not a valid exam status');
+    result.status = s as ExamStatus;
   }
+  if (result.startsOn && result.endsOn && Date.parse(result.endsOn) < Date.parse(result.startsOn)) invalid('endsOn must be on or after startsOn');
 
   return result;
 }
@@ -110,21 +122,21 @@ export function parseUpdateExamDto(body: unknown): UpdateExamDto {
 export function parseCreateExamSubjectDto(body: unknown): CreateExamSubjectDto {
   const b = (body ?? {}) as Record<string, unknown>;
   if (typeof b.subjectId !== 'string' || !b.subjectId.trim()) {
-    throw new Error('subjectId is required');
+    invalid('subjectId is required');
   }
   if (typeof b.semesterId !== 'string' || !b.semesterId.trim()) {
-    throw new Error('semesterId is required');
+    invalid('semesterId is required');
   }
   if (typeof b.examAt !== 'string' || isNaN(Date.parse(b.examAt))) {
-    throw new Error('Valid examAt date is required');
+    invalid('Valid examAt date is required');
   }
   const maxMarks = Number(b.maxMarks);
   const passMarks = Number(b.passMarks);
   if (isNaN(maxMarks) || maxMarks <= 0) {
-    throw new Error('maxMarks must be a positive number');
+    invalid('maxMarks must be a positive number');
   }
   if (isNaN(passMarks) || passMarks < 0 || passMarks > maxMarks) {
-    throw new Error('passMarks must be a non-negative number <= maxMarks');
+    invalid('passMarks must be a non-negative number <= maxMarks');
   }
 
   return {
@@ -140,18 +152,18 @@ export function parseCreateExamSubjectDto(body: unknown): CreateExamSubjectDto {
 export function parseUpdateMarksDto(body: unknown): UpdateMarksDto {
   const b = (body ?? {}) as Record<string, unknown>;
   if (!Array.isArray(b.marks)) {
-    throw new Error('marks must be an array');
+    invalid('marks must be an array');
   }
 
   const marks: MarkEntryDto[] = b.marks.map((item: unknown) => {
     const m = (item ?? {}) as Record<string, unknown>;
     if (typeof m.studentId !== 'string' || !m.studentId.trim()) {
-      throw new Error('Each mark entry requires a studentId');
+      invalid('Each mark entry requires a studentId');
     }
 
     const marksObtained = m.marksObtained !== undefined && m.marksObtained !== null ? Number(m.marksObtained) : null;
     if (marksObtained !== null && (isNaN(marksObtained) || marksObtained < 0)) {
-      throw new Error('marksObtained must be a non-negative number');
+      invalid('marksObtained must be a non-negative number');
     }
 
     return {

@@ -48,3 +48,28 @@ describe('VisitorsService department scope', () => {
     await expect(service.reviewVisitor('v-1', { decision: 'REJECTED' }, admin)).rejects.toBeInstanceOf(ConflictException);
   });
 });
+
+describe('VisitorsService host', () => {
+  const student: AuthorizationContext = { userId: 'stu-user', collegeId: 'col-a', roles: ['STUDENT'], permissions: [], departmentId: null };
+  const database = { user: { findFirst: jest.fn() }, visitor: { create: jest.fn().mockResolvedValue({ id: 'visitor-1' }) } };
+  const service = new VisitorsService(database as never);
+  const input = { name: 'Parent', phone: '9876543210', purpose: 'Meeting', visitDate: new Date('2026-12-01'), hostUserId: 'someone' };
+  beforeEach(() => jest.clearAllMocks());
+
+  it('refuses a host that is not an active staff member of the college', async () => {
+    database.user.findFirst.mockResolvedValue(null);
+    await expect(service.registerVisitor(input as never, student)).rejects.toMatchObject({ response: { code: 'INVALID_HOST' } });
+    expect(database.user.findFirst).toHaveBeenCalledWith({
+      where: { id: 'someone', collegeId: 'col-a', status: 'ACTIVE', userRoles: { some: { role: { name: { in: ['ADMIN', 'HOD', 'FACULTY'] } } } } },
+      select: { id: true },
+    });
+    expect(database.visitor.create).not.toHaveBeenCalled();
+  });
+
+  it('registers a visitor for a staff host, or with no host', async () => {
+    database.user.findFirst.mockResolvedValue({ id: 'someone' });
+    await expect(service.registerVisitor(input as never, student)).resolves.toEqual({ id: 'visitor-1' });
+    await expect(service.registerVisitor({ ...input, hostUserId: undefined } as never, student)).resolves.toEqual({ id: 'visitor-1' });
+    expect(database.user.findFirst).toHaveBeenCalledTimes(1);
+  });
+});

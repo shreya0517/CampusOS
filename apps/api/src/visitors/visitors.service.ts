@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { NotificationsService } from '../notifications/notifications.service';
 import { VisitorStatus } from '@prisma/client';
 import { DatabaseService } from '../database.service';
@@ -41,6 +41,15 @@ export class VisitorsService {
   }
 
   async registerVisitor(input: CreateVisitorDto, context: AuthorizationContext): Promise<unknown> {
+    // The host decides which HOD approves, so it must be a real, active staff member of this college; an unknown id
+    // used to fail the insert with a 500, and naming a student would route the approval to the wrong place.
+    if (input.hostUserId) {
+      const host = await this.database.user.findFirst({
+        where: { id: input.hostUserId, collegeId: context.collegeId, status: 'ACTIVE', userRoles: { some: { role: { name: { in: ['ADMIN', 'HOD', 'FACULTY'] } } } } },
+        select: { id: true },
+      });
+      if (!host) throw new BadRequestException({ code: 'INVALID_HOST', message: 'The host must be an active staff member of the college.' });
+    }
     const visitor = await this.database.visitor.create({
       data: {
         collegeId: context.collegeId,

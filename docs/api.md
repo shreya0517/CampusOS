@@ -167,6 +167,7 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
   - Once the exam has results, its papers are fixed (409 RESULTS_PUBLISHED).
   - A paper can be removed only while its marks are a draft (409 MARKS_IN_REVIEW). Each removal writes an EXAM_PAPER_REMOVED audit entry with the number of marks deleted.
 - GET /api/v1/exams/:id/results: ADMIN sees every student's result; an HOD sees their department's students; FACULTY see students actively enrolled in a section where they teach.
+- Malformed exam input (names, dates, marks) returns 400 INVALID_INPUT with the reason, not a 500.
 - GET /api/v1/exams and GET /api/v1/exams/:id: ADMIN, HOD and FACULTY see every exam. Everyone else (students) sees only SCHEDULED and COMPLETED exams; a draft or cancelled exam returns 404 EXAM_NOT_FOUND by id, as if it didn't exist.
 - GET /api/v1/exams/me/results (STUDENT) and the student's view of GET /api/v1/exams/:id: a student sees their result, and their paper marks for an exam, only once that result is published. Marks that are still being entered, submitted or reviewed stay with staff.
 - POST /api/v1/exams/:id/calculate-results: ADMIN only, and only once every paper of the exam is APPROVED (otherwise 409 MARKS_NOT_APPROVED).
@@ -175,6 +176,7 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 
 ## Coursework Submissions
 
+- Classes in assignment and timetable responses carry their teacher's id and name only, not the employee code or account id, since students read them too.
 - POST /api/v1/assignments/:id/submissions (STUDENT): `status` may be DRAFT (save without handing in) or SUBMITTED, the default. Anything else is 400. Whether it is LATE comes from the due date, never from the request.
 - Graded work is final (409 SUBMISSION_GRADED) until the teacher returns it. Work that was handed in can't go back to a draft (409 ALREADY_SUBMITTED).
 - Handing in returned work clears the old marks, since it needs grading again; the feedback stays.
@@ -198,6 +200,7 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
   - PUT /api/v1/tasks/assignments/:id/review: only while SUBMITTED. The reviewer's notes go in `reviewNotes`, leaving the instructions in `notes`, and each review writes a TASK_REVIEWED audit entry with the decision and notes.
   - Every one of these writes applies only if the assignment is still in the state it was read in. Otherwise it returns 409 TASK_STATUS_CHANGED, so two reviewers, or a review and a resubmission, can't overwrite each other.
 - Editing a task (PUT /api/v1/tasks/:id) sends `task:updated` to Admins, the department's HODs and everyone assigned to it (docs/websocket.md).
+- POST /api/v1/visitors: a `hostUserId`, if given, must be an active ADMIN, HOD or FACULTY account in the college (400 INVALID_HOST otherwise), since the host decides which HOD approves.
 - GET /api/v1/visitors, GET /api/v1/visitors/:id and PUT /api/v1/visitors/:id/review: an HOD only reaches visitors whose host is in their department, or, when no host is named, whose registrant is in it (404 otherwise). Only PENDING requests can be reviewed, atomically, so a second concurrent decision gets 409 VISITOR_ALREADY_REVIEWED. ADMIN reaches every visitor in the college.
 - GET /api/v1/timetable: HOD lists only their department's timetable; FACULTY lists only the classes they teach; STUDENT lists only their own sections.
 - GET /api/v1/timetable/me: STUDENT gets their sections; FACULTY and HOD get the classes they teach; ADMIN gets the whole college.

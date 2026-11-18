@@ -342,10 +342,13 @@ export class AssignmentsService {
   }
 }
 
+/** The teacher is shown by name: students see these classes, so employee codes and account ids stay out. */
+const FACULTY_NAME = { select: { id: true, firstName: true, lastName: true } } as const;
+
 const classInclude = {
   section: { include: { semester: { include: { course: { include: { department: true } } } } } },
   subject: true,
-  faculty: true,
+  faculty: FACULTY_NAME,
 };
 
 const assignmentInclude = {
