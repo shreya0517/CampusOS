@@ -833,6 +833,8 @@ model Announcement {
   expiresAt      DateTime?
   /// When the audience was notified. Set once: at publishing, or by the scheduled delivery when publishedAt arrives.
   notifiedAt     DateTime?
+  /// Archived announcements are hidden from everyone's list and never delivered; Admin can restore them.
+  archivedAt     DateTime?
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
   college        College              @relation(fields: [collegeId], references: [id], onDelete: Cascade)
