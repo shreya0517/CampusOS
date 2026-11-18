@@ -1,4 +1,5 @@
-import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { NotificationsService } from '../notifications/notifications.service';
 import { VisitorStatus } from '@prisma/client';
 import { DatabaseService } from '../database.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
@@ -19,7 +20,10 @@ const visitorInclude = {
 
 @Injectable()
 export class VisitorsService {
-  constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
+  constructor(
+    @Inject(DatabaseService) private readonly database: DatabaseService,
+    @Optional() @Inject(NotificationsService) private readonly notifications?: NotificationsService,
+  ) {}
 
   private isAdmin(context: AuthorizationContext): boolean {
     return context.roles.includes('ADMIN');
@@ -37,7 +41,7 @@ export class VisitorsService {
   }
 
   async registerVisitor(input: CreateVisitorDto, context: AuthorizationContext): Promise<unknown> {
-    return this.database.visitor.create({
+    const visitor = await this.database.visitor.create({
       data: {
         collegeId: context.collegeId,
         name: input.name,
@@ -51,6 +55,19 @@ export class VisitorsService {
       },
       include: visitorInclude,
     });
+    // Approvers: every Admin, and the HOD of the host's department (or the registrant's, when no host is named).
+    await this.notifications?.safely(async (notifications) => {
+      const departmentUser = input.hostUserId ?? context.userId;
+      const profile = await this.database.faculty.findFirst({ where: { collegeId: context.collegeId, userId: departmentUser }, select: { departmentId: true } });
+      const [admins, hods] = await Promise.all([notifications.usersWithRoles(context.collegeId, ['ADMIN']), notifications.hodsOf(context.collegeId, profile?.departmentId)]);
+      await notifications.notify(context.collegeId, [...admins, ...hods].filter((id) => id !== context.userId), {
+        category: 'VISITOR',
+        title: `Visitor approval requested: ${input.name}`,
+        body: `${input.purpose} · ${input.visitDate.toISOString().slice(0, 10)}`,
+        link: '/dashboard/visitors',
+      });
+    });
+    return visitor;
   }
 
   async listVisitors(query: VisitorListQuery, context: AuthorizationContext): Promise<unknown> {
@@ -119,6 +136,12 @@ export class VisitorsService {
     if (decided.count !== 1) {
       throw new ConflictException({ code: 'VISITOR_ALREADY_REVIEWED', message: 'This visitor request has already been reviewed.' });
     }
+    await this.notifications?.notify(context.collegeId, [visitor!.registeredByUserId].filter((id) => id !== context.userId), {
+      category: 'VISITOR',
+      title: `Visitor ${newStatus === VisitorStatus.APPROVED ? 'approved' : 'rejected'}: ${visitor!.name}`,
+      body: `Your visitor request for ${visitor!.visitDate.toISOString().slice(0, 10)} was ${newStatus === VisitorStatus.APPROVED ? 'approved' : 'rejected'}.`,
+      link: '/dashboard/visitors',
+    });
     return this.database.visitor.findFirst({ where: { id, collegeId: context.collegeId }, include: visitorInclude });
   }
 

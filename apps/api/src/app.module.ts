@@ -15,12 +15,14 @@ import { VisitorsModule } from './visitors/visitors.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { EventsModule } from './events/events.module';
 import { OverviewModule } from './overview/overview.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
     AuthModule,
     AuthorizationModule,
     EventsModule,
+    NotificationsModule,
     StudentsModule,
     DepartmentsModule,
     FacultyModule,

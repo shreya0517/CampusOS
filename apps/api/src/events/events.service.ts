@@ -69,6 +69,11 @@ export class EventsService {
     }
   }
 
+  /** Sends an event to every open connection of one user (their personal room). */
+  emitToUser(userId: string, event: string, payload: unknown): void {
+    this.emitToRoom(userRoom(userId), event, payload);
+  }
+
   /* ─── Helpers ──────────────────────────────────────────────────────────── */
 
   private emitToRoom(room: string, event: string, payload: unknown): void {

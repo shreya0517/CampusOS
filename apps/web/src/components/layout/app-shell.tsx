@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useAuth } from '@/components/auth-provider';
+import { NotificationBell } from '@/components/layout/notification-bell';
 import { Button } from '@/components/ui/button';
 import {
   getDefaultDashboardRoute,
@@ -204,6 +205,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
           <div className="ml-auto flex items-center gap-2 sm:gap-4">
             <span className="hidden text-sm text-[hsl(var(--muted-foreground))] md:inline">{today}</span>
+            <NotificationBell />
             <span className="hidden h-6 border-l md:block" aria-hidden="true" />
             <div className="flex items-center gap-3">
               <span

@@ -1,4 +1,5 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { NotificationsService } from '../notifications/notifications.service';
 import { SubmissionStatus } from '@prisma/client';
 import { DatabaseService } from '../database.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
@@ -25,7 +26,10 @@ const classMissing = (): never => {
 
 @Injectable()
 export class AssignmentsService {
-  constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
+  constructor(
+    @Inject(DatabaseService) private readonly database: DatabaseService,
+    @Optional() @Inject(NotificationsService) private readonly notifications?: NotificationsService,
+  ) {}
 
   private scopedDepartment(context: AuthorizationContext, requested?: string): string | undefined {
     if (context.roles.includes('ADMIN')) return requested;
@@ -223,7 +227,7 @@ export class AssignmentsService {
     const isLate = assignment.dueAt && now > assignment.dueAt;
     const computedStatus = input.status ?? (isLate ? SubmissionStatus.LATE : SubmissionStatus.SUBMITTED);
 
-    return this.database.submission.upsert({
+    const submission = await this.database.submission.upsert({
       where: {
         collegeId_assignmentId_studentId: {
           collegeId: context.collegeId,
@@ -246,6 +250,19 @@ export class AssignmentsService {
       },
       include: submissionInclude,
     });
+    // A saved draft isn't handed in yet, so only a real submission reaches the faculty member.
+    if (computedStatus !== SubmissionStatus.DRAFT) {
+      await this.notifications?.safely(async (notifications) => {
+        const owner = await this.database.class.findFirst({ where: { id: assignment.classId, collegeId: context.collegeId }, select: { faculty: { select: { userId: true } } } });
+        await notifications.notify(context.collegeId, [owner?.faculty?.userId], {
+          category: 'ASSIGNMENT',
+          title: `New submission: ${assignment.title}`,
+          body: `${studentProfile!.firstName} ${studentProfile!.lastName} (${studentProfile!.studentCode})${computedStatus === SubmissionStatus.LATE ? ' submitted late.' : ' submitted their work.'}`,
+          link: `/dashboard/assignments/${assignmentId}`,
+        });
+      });
+    }
+    return submission;
   }
 
   async listSubmissions(assignmentId: string, context: AuthorizationContext) {
@@ -275,7 +292,7 @@ export class AssignmentsService {
     });
     if (!existing) submissionMissing();
 
-    return this.database.submission.update({
+    const graded = await this.database.submission.update({
       where: { collegeId_id: { collegeId: context.collegeId, id: submissionId } },
       data: {
         marksAwarded: input.marksAwarded,
@@ -284,6 +301,17 @@ export class AssignmentsService {
       },
       include: submissionInclude,
     });
+    await this.notifications?.safely(async (notifications) => {
+      const returned = (input.status ?? SubmissionStatus.GRADED) === SubmissionStatus.RETURNED;
+      const students = await notifications.studentUsers(context.collegeId, [existing!.studentId]);
+      await notifications.notify(context.collegeId, students, {
+        category: 'ASSIGNMENT',
+        title: returned ? `Assignment returned: ${assignment.title}` : `Assignment graded: ${assignment.title}`,
+        body: `${input.marksAwarded}/${assignment.maxMarks}${input.feedback ? ` · ${input.feedback}` : ''}`,
+        link: `/dashboard/assignments/${assignmentId}`,
+      });
+    });
+    return graded;
   }
 }
 

@@ -104,6 +104,19 @@ enum NotificationStatus {
   FAILED
 }
 
+/// What a notification is about, for filtering. SYSTEM covers anything else.
+enum NotificationCategory {
+  TASK
+  ATTENDANCE
+  EXAM
+  ASSIGNMENT
+  FEE
+  VISITOR
+  ANNOUNCEMENT
+  ACCOUNT
+  SYSTEM
+}
+
 enum FileVisibility {
   PRIVATE
   COLLEGE
@@ -811,22 +824,26 @@ model Announcement {
 }
 
 model Notification {
-  id        String              @id @default(cuid())
+  id        String               @id @default(cuid())
   collegeId String
   userId    String
-  channel   NotificationChannel @default(IN_APP)
-  status    NotificationStatus  @default(PENDING)
+  channel   NotificationChannel  @default(IN_APP)
+  status    NotificationStatus   @default(PENDING)
+  category  NotificationCategory @default(SYSTEM)
   title     String
   body      String
+  /// In-app path to the related record, such as /dashboard/tasks/abc.
+  link      String?
   readAt    DateTime?
   sentAt    DateTime?
-  createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
-  college   College             @relation(fields: [collegeId], references: [id], onDelete: Cascade)
-  user      User                @relation(fields: [collegeId, userId], references: [collegeId, id], onDelete: Cascade)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  college   College              @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  user      User                 @relation(fields: [collegeId, userId], references: [collegeId, id], onDelete: Cascade)
 
   @@unique([collegeId, id])
   @@index([collegeId, userId, status, createdAt])
+  @@index([collegeId, userId, readAt])
 }
 
 model File {

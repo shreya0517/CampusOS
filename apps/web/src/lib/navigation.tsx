@@ -38,6 +38,7 @@ export function getDefaultDashboardRoute(role: CanonicalRole): string {
 export const ROLE_NAVIGATION: Record<CanonicalRole, NavItem[]> = {
   SUPER_ADMIN: [
     { group: 'Overview', label: 'Dashboard', href: '/dashboard', icon: 'dashboard', exact: true },
+    { group: 'Overview', label: 'Notifications', href: '/dashboard/notifications', icon: 'notifications' },
     { group: 'Overview', label: 'Institutional Overview', href: '/dashboard/institutional-overview', icon: 'analytics' },
     { group: 'Administration', label: 'Tasks', href: '/dashboard/tasks', icon: 'tasks' },
     { group: 'Administration', label: 'Faculty Performance', href: '/dashboard/faculty-performance', icon: 'performance' },
@@ -57,6 +58,7 @@ export const ROLE_NAVIGATION: Record<CanonicalRole, NavItem[]> = {
   ],
   ADMIN: [
     { group: 'Overview', label: 'Dashboard', href: '/dashboard', icon: 'dashboard', exact: true },
+    { group: 'Overview', label: 'Notifications', href: '/dashboard/notifications', icon: 'notifications' },
     { group: 'Overview', label: 'Institutional Overview', href: '/dashboard/institutional-overview', icon: 'analytics' },
     { group: 'Administration', label: 'Tasks', href: '/dashboard/tasks', icon: 'tasks' },
     { group: 'Administration', label: 'Faculty Performance', href: '/dashboard/faculty-performance', icon: 'performance' },
@@ -76,6 +78,7 @@ export const ROLE_NAVIGATION: Record<CanonicalRole, NavItem[]> = {
   ],
   HOD: [
     { group: 'Overview', label: 'Dashboard', href: '/dashboard', icon: 'dashboard', exact: true },
+    { group: 'Overview', label: 'Notifications', href: '/dashboard/notifications', icon: 'notifications' },
     { group: 'Overview', label: 'Department', href: '/dashboard/hod-overview', icon: 'department' },
     { group: 'Administration', label: 'Tasks', href: '/dashboard/tasks', icon: 'tasks' },
     { group: 'Administration', label: 'Faculty Performance', href: '/dashboard/faculty-performance', icon: 'performance' },
@@ -93,6 +96,7 @@ export const ROLE_NAVIGATION: Record<CanonicalRole, NavItem[]> = {
   ],
   FACULTY: [
     { group: 'Overview', label: 'Dashboard', href: '/dashboard', icon: 'dashboard', exact: true },
+    { group: 'Overview', label: 'Notifications', href: '/dashboard/notifications', icon: 'notifications' },
     { group: 'Overview', label: 'My Tasks', href: '/dashboard/tasks', icon: 'tasks' },
     { group: 'Teaching', label: 'My Classes', href: '/dashboard/classes', icon: 'classes' },
     { group: 'Teaching', label: 'Timetable', href: '/dashboard/timetable', icon: 'timetable' },
@@ -109,6 +113,7 @@ export const ROLE_NAVIGATION: Record<CanonicalRole, NavItem[]> = {
   ],
   STUDENT: [
     { group: 'Overview', label: 'My Dashboard', href: '/dashboard/student', icon: 'dashboard', exact: true },
+    { group: 'Overview', label: 'Notifications', href: '/dashboard/notifications', icon: 'notifications' },
     { group: 'Academics', label: 'Attendance', href: '/dashboard/student/attendance', icon: 'attendance' },
     { group: 'Academics', label: 'Timetable', href: '/dashboard/timetable', icon: 'timetable' },
     { group: 'Academics', label: 'Assignments', href: '/dashboard/assignments', icon: 'assignments' },
@@ -153,6 +158,7 @@ export function isRouteAllowedForRole(pathname: string, role: CanonicalRole): bo
     if (clean === '/dashboard/student/profile') return true;
     if (clean === '/dashboard/settings') return true;
     if (clean === '/dashboard/announcements') return true;
+    if (clean === '/dashboard/notifications') return true;
     if (clean.startsWith('/dashboard/timetable') && clean !== '/dashboard/timetable/new') return true;
     if (clean.startsWith('/dashboard/assignments') && clean !== '/dashboard/assignments/new') return true;
     if (clean === '/dashboard/exams/me') return true;
@@ -338,6 +344,12 @@ export function NavIcon({ name, className = 'h-5 w-5' }: { name: string; classNa
         <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z" />
           <path strokeLinecap="round" strokeLinejoin="round" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />
+        </svg>
+      );
+    case 'notifications':
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0a3 3 0 1 1-6 0m6 0H9" />
         </svg>
       );
     case 'settings':
