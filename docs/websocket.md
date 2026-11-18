@@ -23,7 +23,8 @@ All room joins occur server-side inside `EventsGateway.joinAuthorizedRooms()` up
 | `college:{collegeId}` | College-wide broadcasts and administrative event tracking | All authenticated users in the college |
 | `user:{userId}` | Targeted direct notifications (e.g. task assignment, review outcome) | The specific authenticated user |
 | `role:{collegeId}:{role}` | Role-specific alerts (e.g. `role:c1:FACULTY`, `role:c1:HOD`) | Users holding that role in the college |
-| `department:{collegeId}:{departmentId}` | Departmental operations (e.g. departmental tasks, approvals) | Faculty and HOD assigned to that department |
+| `department:{collegeId}:{departmentId}` | Departmental broadcasts | Faculty and HOD assigned to that department |
+| `department:{collegeId}:{departmentId}:hod` | The department's tasks, for oversight | HODs of that department only |
 
 Clients cannot request or leave rooms arbitrarily. The Socket.IO gateway handles all room assignments based on the server-resolved `AuthorizationContext`.
 
@@ -66,12 +67,14 @@ sequenceDiagram
 
 | Event Name | Trigger | Target Rooms | Payload Summary |
 |---|---|---|---|
-| `task:created` | Task created by Admin/HOD | `college:{collegeId}`, `department:{collegeId}:{deptId}` | Task details, creator, priority, deadline |
-| `task:assigned` | Task assigned to faculty/HOD | `user:{assigneeUserId}`, `college:{collegeId}` | Task details, assignment ID, assignee ID |
-| `task:started` | Assignee marks task `IN_PROGRESS` | `college:{collegeId}`, `user:{actorUserId}` | Task details, assignment ID, status |
-| `task:submitted`| Assignee submits completed work | `college:{collegeId}`, `department:{collegeId}:{deptId}` | Task details, submission preview |
-| `task:reviewed` | Manager approves or requests rework | `user:{assigneeUserId}`, `college:{collegeId}` | Review decision (`APPROVED`/`REWORK`), feedback |
-| `task:updated`  | Task metadata modified | `college:{collegeId}`, `department:{collegeId}:{deptId}` | Updated task details |
+| `task:created` | Task created by Admin/HOD | `role:{collegeId}:ADMIN`, `department:{collegeId}:{deptId}:hod` | Task details, creator, priority, deadline |
+| `task:assigned` | Task assigned to faculty/HOD | `role:{collegeId}:ADMIN`, `department:{collegeId}:{deptId}:hod`, `user:{assigneeUserId}` | Task details, assignment ID, assignee ID |
+| `task:started` | Assignee marks task `IN_PROGRESS` | `role:{collegeId}:ADMIN`, `department:{collegeId}:{deptId}:hod`, `user:{actorUserId}` | Task details, assignment ID, status |
+| `task:submitted`| Assignee submits completed work | `role:{collegeId}:ADMIN`, `department:{collegeId}:{deptId}:hod`, `user:{actorUserId}` | Task details, submission preview |
+| `task:reviewed` | Manager approves or requests rework | `role:{collegeId}:ADMIN`, `department:{collegeId}:{deptId}:hod`, `user:{assigneeUserId}` | Review decision (`APPROVED`/`REWORK`), feedback |
+| `task:updated`  | Task details edited | `role:{collegeId}:ADMIN`, `department:{collegeId}:{deptId}:hod`, `user:{assigneeUserId}` for every assignee | Updated task details |
+
+Task events never go to `college:{collegeId}` or to the whole `department:{collegeId}:{deptId}` room: students and other staff must not see task titles, assignees or review outcomes. A college-wide task (no department) goes to Admins and the people on it. Each event is one emit to all its rooms, so someone in several of them gets it once.
 
 ### Payload Structure (`TaskEventPayload`)
 

@@ -20,6 +20,10 @@ export const roleRoom = (collegeId: string, role: string): string => `role:${col
 export const departmentRoom = (collegeId: string, departmentId: string): string =>
   `department:${collegeId}:${departmentId}`;
 
+/** The HODs of one department only; the department's faculty are not in it. */
+export const departmentHeadsRoom = (collegeId: string, departmentId: string): string =>
+  `department:${collegeId}:${departmentId}:hod`;
+
 /* ─── Event names ──────────────────────────────────────────────────────────── */
 
 export const TASK_EVENTS = {

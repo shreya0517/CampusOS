@@ -25,7 +25,10 @@ export type TaskAssignment = {
   taskId: string;
   assigneeUserId: string;
   status: TaskStatus;
+  /** The assigner's instructions. */
   notes: string | null;
+  /** The reviewer's feedback on the last review. */
+  reviewNotes: string | null;
   submittedAt: string | null;
   submissionContent: string | null;
   reviewedAt: string | null;
@@ -70,7 +73,7 @@ export const listMyAssignments = (params?: URLSearchParams): Promise<AssignmentL
 export const getMyAssignmentStats = (): Promise<TaskStats> =>
   authenticatedRequest('/tasks/my/stats');
 
-export const updateMyAssignmentStatus = (assignmentId: string, input: { status: TaskStatus; notes?: string }): Promise<TaskAssignment> =>
+export const updateMyAssignmentStatus = (assignmentId: string, input: { status: TaskStatus }): Promise<TaskAssignment> =>
   authenticatedRequest(`/tasks/assignments/${assignmentId}/status`, { method: 'PUT', body: JSON.stringify(input) });
 
 export const submitTask = (assignmentId: string, input: { content: string }): Promise<TaskAssignment> =>

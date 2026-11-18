@@ -2,7 +2,7 @@ import { EventsGateway } from './events.gateway';
 import type { AuthService } from '../auth/auth.service';
 import type { AuthorizationService } from '../authorization/authorization.service';
 import type { EventsService } from './events.service';
-import { collegeRoom, departmentRoom, roleRoom, userRoom } from './events.types';
+import { collegeRoom, departmentHeadsRoom, departmentRoom, roleRoom, userRoom } from './events.types';
 
 describe('EventsGateway', () => {
   let gateway: EventsGateway;
@@ -142,6 +142,17 @@ describe('EventsGateway', () => {
       expect(client.join).toHaveBeenCalledWith(userRoom('faculty-1'));
       expect(client.join).toHaveBeenCalledWith(roleRoom('college-alpha', 'FACULTY'));
       expect(client.join).toHaveBeenCalledWith(departmentRoom('college-alpha', 'dept-cs'));
+      // Faculty don't join the HODs' room, so they don't get the department's task events.
+      expect(client.join).not.toHaveBeenCalledWith(departmentHeadsRoom('college-alpha', 'dept-cs'));
+    });
+
+    it("puts an HOD in their department's HOD room", async () => {
+      const client = createMockSocket('hod-jwt-token');
+      mockAuthService.verifyAccessToken!.mockReturnValue({ sub: 'hod-1', collegeId: 'college-alpha', sid: 'session-3', exp: Date.now() + 10000 });
+      mockAuthService.authorizeAccessToken!.mockResolvedValue({ id: 'hod-1', collegeId: 'college-alpha', email: 'hod@college.edu', displayName: 'HOD', emailVerified: true, roles: ['HOD'] } as never);
+      mockAuthorizationService.getContext!.mockResolvedValue({ userId: 'hod-1', collegeId: 'college-alpha', roles: ['HOD'], permissions: [] as never[], departmentId: 'dept-cs' });
+      await gateway.handleConnection(client as never);
+      expect(client.join).toHaveBeenCalledWith(departmentHeadsRoom('college-alpha', 'dept-cs'));
     });
 
     it('does not join department room if departmentId is null', async () => {

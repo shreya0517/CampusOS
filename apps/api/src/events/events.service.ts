@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { Server } from 'socket.io';
 import {
-  collegeRoom,
-  departmentRoom,
+  departmentHeadsRoom,
+  roleRoom,
   userRoom,
   TASK_EVENTS,
   type TaskEventPayload,
@@ -26,47 +26,39 @@ export class EventsService {
   }
 
   /* ─── Task events ──────────────────────────────────────────────────────── */
+  // A task event reaches the college's Admins, the HODs of the task's department, and the people working on it.
+  // Never the whole college: students and other staff must not see task titles, assignees or review outcomes.
 
   emitTaskCreated(payload: TaskEventPayload, collegeId: string, departmentId: string | null): void {
-    // Notify the college-level admin room and the department room (if scoped).
-    this.emitToRoom(collegeRoom(collegeId), TASK_EVENTS.CREATED, payload);
-    if (departmentId) {
-      this.emitToRoom(departmentRoom(collegeId, departmentId), TASK_EVENTS.CREATED, payload);
-    }
+    this.emitTask(TASK_EVENTS.CREATED, payload, collegeId, departmentId, []);
   }
 
   emitTaskAssigned(payload: TaskEventPayload, collegeId: string, assigneeUserId: string): void {
-    // Notify the assignee directly.
-    this.emitToRoom(userRoom(assigneeUserId), TASK_EVENTS.ASSIGNED, payload);
-    // Also notify the college-level admin room for dashboards.
-    this.emitToRoom(collegeRoom(collegeId), TASK_EVENTS.ASSIGNED, payload);
+    this.emitTask(TASK_EVENTS.ASSIGNED, payload, collegeId, payload.departmentId, [assigneeUserId]);
   }
 
+  /** Also to the assignee's other tabs. */
   emitTaskStarted(payload: TaskEventPayload, collegeId: string): void {
-    this.emitToRoom(collegeRoom(collegeId), TASK_EVENTS.STARTED, payload);
-    // Notify the actor's own user room (other tabs).
-    this.emitToRoom(userRoom(payload.actorUserId), TASK_EVENTS.STARTED, payload);
+    this.emitTask(TASK_EVENTS.STARTED, payload, collegeId, payload.departmentId, [payload.actorUserId]);
   }
 
   emitTaskSubmitted(payload: TaskEventPayload, collegeId: string, departmentId: string | null): void {
-    // Submitted work should reach admins and the department HOD.
-    this.emitToRoom(collegeRoom(collegeId), TASK_EVENTS.SUBMITTED, payload);
-    if (departmentId) {
-      this.emitToRoom(departmentRoom(collegeId, departmentId), TASK_EVENTS.SUBMITTED, payload);
-    }
+    this.emitTask(TASK_EVENTS.SUBMITTED, payload, collegeId, departmentId, [payload.actorUserId]);
   }
 
   emitTaskReviewed(payload: TaskEventPayload, collegeId: string, assigneeUserId: string): void {
-    // The assignee must be notified of the review outcome.
-    this.emitToRoom(userRoom(assigneeUserId), TASK_EVENTS.REVIEWED, payload);
-    this.emitToRoom(collegeRoom(collegeId), TASK_EVENTS.REVIEWED, payload);
+    this.emitTask(TASK_EVENTS.REVIEWED, payload, collegeId, payload.departmentId, [assigneeUserId]);
   }
 
-  emitTaskUpdated(payload: TaskEventPayload, collegeId: string, departmentId: string | null): void {
-    this.emitToRoom(collegeRoom(collegeId), TASK_EVENTS.UPDATED, payload);
-    if (departmentId) {
-      this.emitToRoom(departmentRoom(collegeId, departmentId), TASK_EVENTS.UPDATED, payload);
-    }
+  /** An edit to the task itself also reaches everyone assigned to it. */
+  emitTaskUpdated(payload: TaskEventPayload, collegeId: string, departmentId: string | null, assigneeUserIds: string[] = []): void {
+    this.emitTask(TASK_EVENTS.UPDATED, payload, collegeId, departmentId, assigneeUserIds);
+  }
+
+  private emitTask(event: string, payload: TaskEventPayload, collegeId: string, departmentId: string | null, userIds: string[]): void {
+    const rooms = [roleRoom(collegeId, 'ADMIN'), ...(departmentId ? [departmentHeadsRoom(collegeId, departmentId)] : []), ...userIds.map(userRoom)];
+    // One emit to all the rooms, so someone in several of them (an Admin who is also the assignee) gets it once.
+    this.emitToRooms([...new Set(rooms)], event, payload);
   }
 
   /** Sends an event to every open connection of one user (their personal room). */
@@ -77,10 +69,14 @@ export class EventsService {
   /* ─── Helpers ──────────────────────────────────────────────────────────── */
 
   private emitToRoom(room: string, event: string, payload: unknown): void {
+    this.emitToRooms([room], event, payload);
+  }
+
+  private emitToRooms(rooms: string[], event: string, payload: unknown): void {
     if (!this.server) {
       this.logger.warn(`Cannot emit ${event}: Socket.IO server not ready.`);
       return;
     }
-    this.server.to(room).emit(event, payload);
+    this.server.to(rooms).emit(event, payload);
   }
 }
