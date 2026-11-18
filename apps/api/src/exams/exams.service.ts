@@ -15,8 +15,12 @@ import type {
 /** Students in exam and fee responses carry only identity fields, never contact details. */
 const STUDENT_SUMMARY = { select: { id: true, studentCode: true, firstName: true, lastName: true } };
 
-/** Staff see every exam; everyone else only exams that are scheduled or done, never drafts or cancelled ones. */
-const isStaff = (context: AuthorizationContext): boolean => ['ADMIN', 'HOD', 'FACULTY'].some((role) => context.roles.includes(role as AuthorizationContext['roles'][number]));
+/**
+ * Staff, including a platform SUPER_ADMIN, see every exam; everyone else (students) only exams that are scheduled or
+ * done, never drafts or cancelled ones.
+ */
+const STAFF_ROLES: AuthorizationContext['roles'] = ['SUPER_ADMIN', 'ADMIN', 'HOD', 'FACULTY'];
+const isStaff = (context: AuthorizationContext): boolean => STAFF_ROLES.some((role) => context.roles.includes(role));
 const VISIBLE_TO_STUDENTS: ExamStatus[] = [ExamStatus.SCHEDULED, ExamStatus.COMPLETED];
 
 const denied = (): never => {

@@ -124,9 +124,14 @@ describe('ExamsService', () => {
     }
     expect(database.mark.findMany).not.toHaveBeenCalled();
 
-    // Staff still open a draft.
+    // Staff, and a platform SUPER_ADMIN, still open a draft and list every exam.
     database.exam.findFirst.mockResolvedValueOnce(mockExam);
     await expect(service.getExam('exam-1', faculty)).resolves.toMatchObject({ id: 'exam-1', status: ExamStatus.DRAFT });
+    const superAdmin: AuthorizationContext = { ...admin, roles: ['SUPER_ADMIN'] };
+    database.exam.findFirst.mockResolvedValueOnce(mockExam);
+    await expect(service.getExam('exam-1', superAdmin)).resolves.toMatchObject({ status: ExamStatus.DRAFT });
+    await service.listExams({ page: 1, pageSize: 20 }, superAdmin);
+    expect(database.exam.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: { collegeId: 'col-a' } }));
   });
 
   it('validates marks obtained does not exceed maxMarks on updateSubjectMarks', async () => {
