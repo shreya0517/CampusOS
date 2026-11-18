@@ -143,8 +143,8 @@ export function isRouteAllowedForRole(pathname: string, role: CanonicalRole): bo
   // Root dashboard access (all authenticated roles can access /dashboard)
   if (clean === '/dashboard') return true;
 
-  // SUPER_ADMIN and ADMIN have unrestricted dashboard and foundation access
-  if (role === 'SUPER_ADMIN' || role === 'ADMIN') return true;
+  // SUPER_ADMIN and ADMIN have unrestricted dashboard and foundation access, except recording attendance (Admin decision 2)
+  if (role === 'SUPER_ADMIN' || role === 'ADMIN') return clean !== '/dashboard/attendance/new';
 
   // Specific restrictions for STUDENT
   if (role === 'STUDENT') {
@@ -180,6 +180,7 @@ export function isRouteAllowedForRole(pathname: string, role: CanonicalRole): bo
     if (clean === '/dashboard/timetable/new') return false; // timetables are built by Admin
     if (clean === '/dashboard/students/new') return false; // students are added by Admin
     if (clean === '/dashboard/faculty/new') return false; // faculty are added by Admin
+    if (clean === '/dashboard/attendance/report') return false; // the report is for Admin and HOD
     if (clean === '/foundation') return false;
 
     // Allowed: tasks (list, my, view), attendance, timetable, assignments, students, exams, faculty, faculty/me, files, visitors

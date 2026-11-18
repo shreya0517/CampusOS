@@ -27,7 +27,8 @@ import { Table, TableCell, TableHead } from '@/components/ui/table';
 import { EmptyState, Skeleton } from '@/components/feedback/states';
 import { StudentDashboardView } from '@/components/dashboard/student-dashboard-view';
 import { MarksReviewQueue } from '@/components/dashboard/marks-review-queue';
-import { getInstitutionOverview, type AttendanceSummary, type InstitutionOverview } from '@/lib/overview-api';
+import { getInstitutionOverview, type InstitutionOverview } from '@/lib/overview-api';
+import { AttendanceBar } from '@/components/attendance/attendance-bar';
 import { useTaskEvents, TASK_EVENTS } from '@/lib/use-socket';
 import { NavIcon } from '@/lib/navigation';
 
@@ -181,21 +182,6 @@ function timeAgo(iso: string): string {
   const days = Math.round(hours / 24);
   if (days < 7) return `${days} day${days === 1 ? '' : 's'} ago`;
   return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-}
-
-function AttendanceBar({ summary }: { summary: AttendanceSummary }) {
-  if (summary.percentage === null) return <span className="text-xs text-[hsl(var(--muted-foreground))]">No sessions</span>;
-  const color = summary.belowThreshold ? 'bg-rose-500' : summary.percentage < 85 ? 'bg-amber-500' : 'bg-emerald-500';
-  return (
-    <div className="flex min-w-[9rem] items-center gap-2">
-      <div className="h-2 flex-1 overflow-hidden rounded-full bg-[hsl(var(--muted))]">
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(100, summary.percentage)}%` }} />
-      </div>
-      <span className={`w-12 text-right text-sm font-semibold tabular-nums ${summary.belowThreshold ? 'text-rose-600 dark:text-rose-400' : ''}`}>
-        {summary.percentage}%
-      </span>
-    </div>
-  );
 }
 
 function AdminDashboard() {
