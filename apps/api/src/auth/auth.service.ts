@@ -83,7 +83,7 @@ export class AuthService {
     if (!college) return failed();
     const user = await this.database.user.findUnique({
       where: { collegeId_email: { collegeId: college.id, email: input.email.trim().toLowerCase() } },
-      include: { userRoles: { include: { role: true } }, studentProfiles: true, facultyProfiles: true },
+      include: { userRoles: { include: { role: true } } },
     });
     if (!user || user.status !== 'ACTIVE' || !user.passwordHash || !user.emailVerifiedAt || !(await verifyPassword(input.password, user.passwordHash))) return failed();
     this.loginFailures.reset(key);
@@ -95,7 +95,7 @@ export class AuthService {
     const presented = hashToken(rawToken);
     const session = await this.database.authSession.findUnique({
       where: { refreshTokenHash: presented },
-      include: { user: { include: { userRoles: { include: { role: true } }, studentProfiles: true, facultyProfiles: true } } },
+      include: { user: { include: { userRoles: { include: { role: true } } } } },
     });
     if (!session) {
       await this.revokeOnReuse(presented);
@@ -213,7 +213,7 @@ export class AuthService {
     }
   }
 
-  private async createSession(user: { id: string; collegeId: string; email: string; displayName: string; emailVerifiedAt: Date | null; userRoles?: Array<{ role: { name: string } }>; studentProfiles?: Array<{ id: string }>; facultyProfiles?: Array<{ id: string }> }): Promise<SessionResult> {
+  private async createSession(user: { id: string; collegeId: string; email: string; displayName: string; emailVerifiedAt: Date | null; userRoles?: Array<{ role: { name: string } }> }): Promise<SessionResult> {
     const refreshToken = randomToken();
     const session = await this.database.authSession.create({ data: { collegeId: user.collegeId, userId: user.id, refreshTokenHash: hashToken(refreshToken), expiresAt: new Date(Date.now() + getAuthConfig().refreshTokenTtlDays * 86_400_000) } });
     return { accessToken: this.createAccessToken(user.id, user.collegeId, session.id), refreshToken, user: toPublicUser(user) };
@@ -229,7 +229,7 @@ export class AuthService {
   private async authorizeAccessPayload(payload: AccessPayload): Promise<PublicUser> {
     const session = await this.database.authSession.findUnique({
       where: { id: payload.sid },
-      include: { user: { include: { userRoles: { include: { role: true } }, studentProfiles: true, facultyProfiles: true } } },
+      include: { user: { include: { userRoles: { include: { role: true } } } } },
     });
     if (!session || session.collegeId !== payload.collegeId || session.userId !== payload.sub || session.revokedAt || session.expiresAt <= new Date() || session.user.status !== 'ACTIVE' || !session.user.emailVerifiedAt) throw new UnauthorizedException({ code: 'SESSION_EXPIRED', message: 'Session expired.' });
     return toPublicUser(session.user);
@@ -256,18 +256,14 @@ const toPublicUser = (user: {
   displayName: string;
   emailVerifiedAt: Date | null;
   userRoles?: Array<{ role: { name: string } }>;
-  studentProfiles?: Array<{ id: string }>;
-  facultyProfiles?: Array<{ id: string }>;
 }): PublicUser => {
+  // Roles come only from the user's role assignments, the same source every API check uses. Guessing STUDENT or
+  // FACULTY from a profile showed the app a role the API then refused.
   const roleSet = new Set<string>();
   if (user.userRoles) {
     for (const ur of user.userRoles) {
       if (ur.role?.name) roleSet.add(ur.role.name);
     }
-  }
-  if (roleSet.size === 0) {
-    if (user.studentProfiles && user.studentProfiles.length > 0) roleSet.add('STUDENT');
-    if (user.facultyProfiles && user.facultyProfiles.length > 0) roleSet.add('FACULTY');
   }
   return {
     id: user.id,
