@@ -229,10 +229,34 @@ describe('FeesService', () => {
     it('orders only what is still owed after a part payment', async () => {
       database.invoice.findFirst.mockResolvedValue({ id: 'inv-1', status: InvoiceStatus.PARTIALLY_PAID, amountDue: 25000, invoiceNumber: 'INV-1' });
       database.payment.aggregate.mockResolvedValueOnce({ _sum: { amount: 10000 } });
+      database.payment.findFirst.mockResolvedValueOnce(null);
       database.payment.create.mockResolvedValue({ id: 'pay-1' });
       await expect(service.createRazorpayOrder({ invoiceId: 'inv-1' }, studentContext)).resolves.toMatchObject({ amount: 15000 });
       expect(database.payment.aggregate).toHaveBeenCalledWith({ where: { collegeId: 'col-a', invoiceId: 'inv-1', status: PaymentStatus.COMPLETED }, _sum: { amount: true } });
       expect(database.payment.create).toHaveBeenCalledWith({ data: expect.objectContaining({ amount: 15000, status: PaymentStatus.PENDING }) });
+    });
+
+    it('gives a second tab the open order instead of a second one, and closes any others', async () => {
+      database.invoice.findFirst.mockResolvedValue({ id: 'inv-1', status: InvoiceStatus.ISSUED, amountDue: 25000, invoiceNumber: 'INV-1' });
+      database.payment.findFirst.mockResolvedValueOnce({ id: 'pay-open', amount: 25000, status: PaymentStatus.PENDING, transactionRef: 'order_open' });
+      await expect(service.createRazorpayOrder({ invoiceId: 'inv-1' }, studentContext)).resolves.toMatchObject({ paymentId: 'pay-open', razorpayOrderId: 'order_open', amount: 25000 });
+      expect(database.payment.create).not.toHaveBeenCalled();
+      // The invoice is locked first, and every other open order for it is closed.
+      expect(database.invoice.updateMany).toHaveBeenCalledWith({ where: { id: 'inv-1', collegeId: 'col-a' }, data: { updatedAt: expect.any(Date) } });
+      expect(database.payment.updateMany).toHaveBeenCalledWith({
+        where: { collegeId: 'col-a', invoiceId: 'inv-1', status: PaymentStatus.PENDING, id: { not: 'pay-open' } },
+        data: { status: PaymentStatus.FAILED },
+      });
+    });
+
+    it('replaces an open order for an out-of-date amount', async () => {
+      database.invoice.findFirst.mockResolvedValue({ id: 'inv-1', status: InvoiceStatus.PARTIALLY_PAID, amountDue: 25000, invoiceNumber: 'INV-1' });
+      database.payment.aggregate.mockResolvedValueOnce({ _sum: { amount: 10000 } });
+      database.payment.findFirst.mockResolvedValueOnce({ id: 'pay-old', amount: 25000, status: PaymentStatus.PENDING, transactionRef: 'order_old' });
+      database.payment.create.mockResolvedValue({ id: 'pay-new', transactionRef: 'order_new' });
+      await expect(service.createRazorpayOrder({ invoiceId: 'inv-1' }, studentContext)).resolves.toMatchObject({ paymentId: 'pay-new', razorpayOrderId: 'order_new', amount: 15000 });
+      expect(database.payment.updateMany).toHaveBeenCalledWith({ where: { collegeId: 'col-a', invoiceId: 'inv-1', status: PaymentStatus.PENDING }, data: { status: PaymentStatus.FAILED } });
+      expect(database.payment.create).toHaveBeenCalledWith({ data: expect.objectContaining({ amount: 15000, transactionRef: expect.stringMatching(/^order_/) }) });
     });
 
     it('refuses an order when the payments already cover the invoice', async () => {

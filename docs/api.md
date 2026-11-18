@@ -182,6 +182,7 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 - Orders:
   - Only an ISSUED, PARTIALLY_PAID or OVERDUE invoice can be paid. A DRAFT or VOID invoice returns 409 INVOICE_NOT_PAYABLE, and one already covered by its payments returns 400 INVOICE_ALREADY_PAID.
   - The order is for the balance still owed (the amount due minus completed payments), not the whole amount again.
+  - An invoice has at most one open order. Asking again, for example from a second tab, returns the same order, so the balance can't be charged twice. An open order for a different amount is out of date: it is marked FAILED and replaced. Orders for one invoice are made one at a time, with the invoice row locked.
   - `method` is optional and must be ONLINE (the default), UPI or CARD. Cash and bank transfers aren't made through an online order.
 - Verification:
   - Only a PENDING payment is settled. Verifying a COMPLETED or FAILED one returns 409 PAYMENT_NOT_PENDING and changes nothing.

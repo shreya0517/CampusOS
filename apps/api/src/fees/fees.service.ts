@@ -257,30 +257,46 @@ export class FeesService {
         message: invoice.status === InvoiceStatus.VOID ? 'This invoice was cancelled and cannot be paid.' : 'This invoice has not been issued yet.',
       });
     }
-    // The order is for what is still owed, so an earlier part-payment is never charged again.
-    const balance = Number(invoice.amountDue) - (await paidSoFar(this.database, context.collegeId, invoice.id));
-    if (balance <= 0) {
-      throw new BadRequestException({ code: 'INVOICE_ALREADY_PAID', message: 'Invoice has already been paid.' });
-    }
+    const { payment, balance } = await this.database.$transaction(async (tx) => {
+      // Lock the invoice, so orders for it are made one at a time.
+      await tx.invoice.updateMany({ where: { id: invoice.id, collegeId: context.collegeId }, data: { updatedAt: new Date() } });
+      // The order is for what is still owed, so an earlier part-payment is never charged again.
+      const owed = Number(invoice.amountDue) - (await paidSoFar(tx, context.collegeId, invoice.id));
+      if (owed <= 0) {
+        throw new BadRequestException({ code: 'INVOICE_ALREADY_PAID', message: 'Invoice has already been paid.' });
+      }
 
-    const razorpayOrderId = `order_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+      // One open order per invoice: a second tab or a retry gets the same order, so the balance can't be charged twice.
+      const open = await tx.payment.findFirst({
+        where: { collegeId: context.collegeId, invoiceId: invoice.id, status: PaymentStatus.PENDING },
+        orderBy: { createdAt: 'desc' },
+      });
+      const reuse = open && Number(open.amount) === owed ? open : null;
+      // Any other open order is closed: one for a different amount is out of date, because the balance has changed.
+      await tx.payment.updateMany({
+        where: { collegeId: context.collegeId, invoiceId: invoice.id, status: PaymentStatus.PENDING, ...(reuse ? { id: { not: reuse.id } } : {}) },
+        data: { status: PaymentStatus.FAILED },
+      });
+      if (reuse) return { payment: reuse, balance: owed };
 
-    const payment = await this.database.payment.create({
-      data: {
-        collegeId: context.collegeId,
-        invoiceId: invoice.id,
-        amount: balance,
-        method: input.method ?? PaymentMethod.ONLINE,
-        status: PaymentStatus.PENDING,
-        transactionRef: razorpayOrderId,
-      },
-    });
+      const created = await tx.payment.create({
+        data: {
+          collegeId: context.collegeId,
+          invoiceId: invoice.id,
+          amount: owed,
+          method: input.method ?? PaymentMethod.ONLINE,
+          status: PaymentStatus.PENDING,
+          transactionRef: `order_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`,
+        },
+      });
+      return { payment: created, balance: owed };
+    }, { timeout: 30_000 });
 
     const keyId = process.env.RAZORPAY_KEY_ID || 'rzp_test_campusos_demo';
 
     return {
       paymentId: payment.id,
-      razorpayOrderId,
+      razorpayOrderId: payment.transactionRef,
       amount: balance,
       currency: 'INR',
       keyId,
