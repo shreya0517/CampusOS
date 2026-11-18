@@ -4,12 +4,12 @@ CampusOS is a multi-tenant college management platform. Each college is a separa
 
 ## What each portal does
 
-| Portal      | Main features                                                                                                                                                                                                                        |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Student** | Dashboard, subject-wise attendance (75% threshold), timetable, assignments and submissions, exams and published results, fee invoices with online payment and receipts, announcements, visitor requests, files, profile and password |
-| **Faculty** | Dashboard, my classes, attendance marking (corrections within 48 hours, with history), coursework and grading, marks entry submitted for HOD review, tasks, timetable                                                                |
-| **HOD**     | Department overview, tasks for department staff, faculty performance from system records, marks review (approve or return), visitor approvals, department students, faculty and timetables                                           |
-| **Admin**   | Students and enrollment, faculty, departments, tasks across departments, timetables, exam publishing once every paper is approved, fee structures and invoices, announcements, faculty performance                                   |
+| Portal      | Main features                                                                                                                                                                                                                                                         |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Student** | Dashboard, subject-wise attendance against the college's minimum (75% by default), timetable, assignments and submissions, exams and published results, fee invoices with online payment and receipts, announcements, visitor requests, files, profile and password   |
+| **Faculty** | Dashboard, my classes, attendance marking (corrections within the college's window, 48 hours by default, with history), coursework and grading, marks entry submitted for HOD review, tasks, timetable                                                                |
+| **HOD**     | Department overview, tasks for department staff, faculty performance from system records, marks review (approve or return), visitor approvals, department students, faculty and timetables                                                                            |
+| **Admin**   | Students and enrollment, faculty, departments, tasks across departments, timetables, exam publishing once every paper is approved, fee structures and invoices, announcements, faculty performance, college settings (profile, minimum attendance, correction window) |
 
 Marks follow an approval workflow: **faculty submit → HOD approves or returns → Admin publishes results**. Every step is recorded in the audit log.
 
