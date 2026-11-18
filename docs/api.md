@@ -190,3 +190,10 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 - PUT /api/v1/faculty/:id/account: ADMIN only, body `{ "status": "ACTIVE" | "INACTIVE" }`. Deactivating ends all of the person's sessions. 409 NO_ACCOUNT without an account, 409 OWN_ACCOUNT for your own.
 - Account creation and status changes are audited (FACULTY_ACCOUNT_CREATED, FACULTY_ACCOUNT_ACTIVATED, FACULTY_ACCOUNT_DEACTIVATED).
 - PUT /api/v1/faculty/:id accepts `designation` (null or an empty string clears it) and `departmentId`.
+
+## Department Administration
+
+- GET /api/v1/departments: each department now carries `hod` (`{ facultyId, name, employeeCode, designation }` or null) and `counts` (`faculty`, `students` with an active enrollment, `courses`, `subjects`). The `faculty` list holds id, name and employee code only. Admin sees every department; HOD and faculty only their own.
+- GET /api/v1/departments/:id: the same, plus `courses` (code, name, duration, number of semesters) and `subjects` (code, name, credits, course and semester).
+- PUT /api/v1/departments/:id/hod: ADMIN only, body `{ "facultyId": string | null }`. Assigns, changes or (with null) removes the department's HOD. The HOD is a faculty member of this department with an active sign-in account; otherwise 409 NOT_IN_DEPARTMENT, NO_ACCOUNT or ACCOUNT_INACTIVE. Anyone else holding the HOD role in the department loses it, so each department has one head. Roles are read on every request, so the change applies at once; the web app shows the HOD portal from the person's next sign-in. Audited as DEPARTMENT_HOD_CHANGED.
+- PUT /api/v1/faculty/:id: moving an HOD to another department also removes their HOD role (they no longer head the old department), audited the same way.

@@ -173,10 +173,18 @@ export class FacultyService {
 
   async update(id: string, input: FacultyUpdateDto, c: AuthorizationContext) {
     this.write(c);
-    await this.get(id, c);
+    const before = await this.get(id, c);
     const departmentId = input.departmentId === undefined ? undefined : await this.validDepartment(input.departmentId, c);
+    // An HOD heads the department of their faculty profile; moving them elsewhere ends that, so the HOD role goes too.
+    const leavesAsHod = before.isHod && departmentId !== undefined && departmentId !== before.departmentId && Boolean(before.userId);
     try {
-      await this.database.faculty.update({ where: { collegeId_id: { collegeId: c.collegeId, id } }, data: { ...input, departmentId } });
+      await this.database.$transaction(async (tx) => {
+        await tx.faculty.update({ where: { collegeId_id: { collegeId: c.collegeId, id } }, data: { ...input, departmentId } });
+        if (leavesAsHod) {
+          await tx.userRole.deleteMany({ where: { collegeId: c.collegeId, userId: before.userId as string, role: { name: 'HOD' } } });
+          await tx.auditLog.create({ data: { collegeId: c.collegeId, actorId: c.userId, action: 'DEPARTMENT_HOD_CHANGED', entityType: 'Department', entityId: before.departmentId as string, metadata: { from: [id], to: null, reason: 'HOD moved to another department' } } });
+        }
+      });
     } catch (error) {
       if (isUniqueViolation(error)) throw new ConflictException({ code: 'FACULTY_EXISTS', message: 'Employee code already exists.' });
       throw error;
