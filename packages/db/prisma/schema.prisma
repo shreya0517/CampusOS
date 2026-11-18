@@ -90,6 +90,15 @@ enum AnnouncementAudience {
   STAFF
 }
 
+enum AnnouncementCategory {
+  GENERAL
+  ACADEMIC
+  EXAMINATION
+  HOLIDAY
+  EVENT
+  DEADLINE
+}
+
 enum NotificationChannel {
   IN_APP
   EMAIL
@@ -322,17 +331,18 @@ model RolePermission {
 }
 
 model Department {
-  id        String    @id @default(cuid())
-  collegeId String
-  code      String
-  name      String
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  college   College   @relation(fields: [collegeId], references: [id], onDelete: Cascade)
-  courses   Course[]
-  subjects  Subject[]
-  faculty   Faculty[]
-  tasks     Task[]
+  id            String         @id @default(cuid())
+  collegeId     String
+  code          String
+  name          String
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  college       College        @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  courses       Course[]
+  subjects      Subject[]
+  faculty       Faculty[]
+  tasks         Task[]
+  announcements Announcement[]
 
   @@unique([collegeId, id])
   @@unique([collegeId, code])
@@ -454,18 +464,19 @@ model Faculty {
 }
 
 model Section {
-  id           String        @id @default(cuid())
-  collegeId    String
-  semesterId   String
-  code         String
-  capacity     Int?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  college      College       @relation(fields: [collegeId], references: [id], onDelete: Cascade)
-  semester     Semester      @relation(fields: [collegeId, semesterId], references: [collegeId, id], onDelete: Cascade)
-  enrollments  Enrollment[]
-  classes      Class[]
-  examSubjects ExamSubject[]
+  id            String         @id @default(cuid())
+  collegeId     String
+  semesterId    String
+  code          String
+  capacity      Int?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  college       College        @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  semester      Semester       @relation(fields: [collegeId, semesterId], references: [collegeId, id], onDelete: Cascade)
+  enrollments   Enrollment[]
+  classes       Class[]
+  examSubjects  ExamSubject[]
+  announcements Announcement[]
 
   @@unique([collegeId, id])
   @@unique([collegeId, semesterId, code])
@@ -806,21 +817,32 @@ model Receipt {
 }
 
 model Announcement {
-  id          String               @id @default(cuid())
-  collegeId   String
-  authorId    String
-  title       String
-  body        String
-  audience    AnnouncementAudience @default(ALL)
-  publishedAt DateTime?
-  expiresAt   DateTime?
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
-  college     College              @relation(fields: [collegeId], references: [id], onDelete: Cascade)
-  author      User                 @relation("AnnouncementAuthor", fields: [collegeId, authorId], references: [collegeId, id], onDelete: Restrict)
+  id             String               @id @default(cuid())
+  collegeId      String
+  authorId       String
+  title          String
+  body           String
+  audience       AnnouncementAudience @default(ALL)
+  category       AnnouncementCategory @default(GENERAL)
+  /// Optional target. Only people in this department, semester number or section see it (Admins see every
+  /// announcement). A section target also stores its department and semester number.
+  departmentId   String?
+  semesterNumber Int?
+  sectionId      String?
+  publishedAt    DateTime?
+  expiresAt      DateTime?
+  /// When the audience was notified. Set once: at publishing, or by the scheduled delivery when publishedAt arrives.
+  notifiedAt     DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  college        College              @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  author         User                 @relation("AnnouncementAuthor", fields: [collegeId, authorId], references: [collegeId, id], onDelete: Restrict)
+  department     Department?          @relation(fields: [collegeId, departmentId], references: [collegeId, id], onDelete: Restrict)
+  section        Section?             @relation(fields: [collegeId, sectionId], references: [collegeId, id], onDelete: Restrict)
 
   @@unique([collegeId, id])
   @@index([collegeId, audience, publishedAt])
+  @@index([notifiedAt, publishedAt])
 }
 
 model Notification {
