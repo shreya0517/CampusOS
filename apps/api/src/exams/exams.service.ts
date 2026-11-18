@@ -129,23 +129,24 @@ export class ExamsService {
 
     if (context.roles.includes('STUDENT') && !isStaff(context)) {
       const studentId = await this.getStudentId(context);
-      const [result, marks] = await Promise.all([
-        this.database.result.findFirst({
-          where: { collegeId: context.collegeId, examId: id, studentId },
-        }),
-        this.database.mark.findMany({
-          where: {
-            collegeId: context.collegeId,
-            studentId,
-            examSubject: { examId: id },
-          },
-          include: {
-            examSubject: {
-              include: { subject: true },
+      // Marks reach the student only with their published result: before that they are still being entered and reviewed.
+      const result = await this.database.result.findFirst({
+        where: { collegeId: context.collegeId, examId: id, studentId, publishedAt: { not: null } },
+      });
+      const marks = result
+        ? await this.database.mark.findMany({
+            where: {
+              collegeId: context.collegeId,
+              studentId,
+              examSubject: { examId: id },
             },
-          },
-        }),
-      ]);
+            include: {
+              examSubject: {
+                include: { subject: true },
+              },
+            },
+          })
+        : [];
 
       return {
         ...exam,
@@ -671,7 +672,8 @@ export class ExamsService {
       where: {
         collegeId: context.collegeId,
         studentId,
-        exam: { status: { in: [ExamStatus.SCHEDULED, ExamStatus.COMPLETED] } },
+        publishedAt: { not: null },
+        exam: { status: { in: VISIBLE_TO_STUDENTS } },
       },
       include: {
         exam: true,
@@ -679,10 +681,13 @@ export class ExamsService {
       orderBy: { createdAt: 'desc' },
     });
 
+    // Only marks of exams whose result has been published to this student. Marks being entered, submitted or
+    // reviewed stay with staff, so the approval step isn't bypassed.
     const marks = await this.database.mark.findMany({
       where: {
         collegeId: context.collegeId,
         studentId,
+        examSubject: { exam: { status: { in: VISIBLE_TO_STUDENTS }, results: { some: { collegeId: context.collegeId, studentId, publishedAt: { not: null } } } } },
       },
       include: {
         examSubject: {

@@ -200,6 +200,36 @@ describe('ExamsService', () => {
       where: { collegeId: 'col-a', userId: 'stu-user' },
     });
   });
+
+  it('shows a student marks only for exams whose result is published to them', async () => {
+    database.student.findFirst.mockResolvedValue({ id: 'stu-profile-1' });
+    database.result.findMany.mockResolvedValue([]);
+    database.mark.findMany.mockResolvedValue([]);
+    await service.getMyResults(student);
+    expect(database.result.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ studentId: 'stu-profile-1', publishedAt: { not: null } }) }));
+    expect(database.mark.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          collegeId: 'col-a',
+          studentId: 'stu-profile-1',
+          examSubject: { exam: { status: { in: [ExamStatus.SCHEDULED, ExamStatus.COMPLETED] }, results: { some: { collegeId: 'col-a', studentId: 'stu-profile-1', publishedAt: { not: null } } } } },
+        },
+      }),
+    );
+  });
+
+  it("gives a student an exam's marks only with their published result", async () => {
+    database.student.findFirst.mockResolvedValue({ id: 'stu-profile-1' });
+    database.exam.findFirst.mockResolvedValue({ ...mockExam, status: ExamStatus.SCHEDULED });
+    database.result.findFirst.mockResolvedValueOnce(null);
+    await expect(service.getExam('exam-1', student)).resolves.toMatchObject({ studentResult: null, studentMarks: [] });
+    expect(database.result.findFirst).toHaveBeenCalledWith({ where: { collegeId: 'col-a', examId: 'exam-1', studentId: 'stu-profile-1', publishedAt: { not: null } } });
+    expect(database.mark.findMany).not.toHaveBeenCalled();
+
+    database.result.findFirst.mockResolvedValueOnce({ id: 'res-1', publishedAt: new Date() });
+    database.mark.findMany.mockResolvedValueOnce([{ id: 'mark-1' }]);
+    await expect(service.getExam('exam-1', student)).resolves.toMatchObject({ studentMarks: [{ id: 'mark-1' }] });
+  });
 });
 
 describe('ExamsService student fields in results', () => {

@@ -27,6 +27,8 @@ export type FacultyClass = {
 };
 export type Faculty = {
   id: string;
+  /** The sign-in account's user id, or null when the person has no account. Tasks are assigned to this id. */
+  userId: string | null;
   employeeCode: string;
   firstName: string;
   lastName: string;

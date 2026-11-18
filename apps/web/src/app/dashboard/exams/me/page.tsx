@@ -165,7 +165,7 @@ export default function MyResultsPage() {
             </Table>
           ) : (
             <div className="p-8 text-center text-sm text-[hsl(var(--muted-foreground))]">
-              No subject paper marks uploaded yet.
+              Your paper marks appear here once your exam results are published.
             </div>
           )}
         </CardContent>

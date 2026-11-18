@@ -154,6 +154,7 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
   - POST /api/v1/exams/:id/subjects/:examSubjectId/marks/review: HOD of the paper's department, or ADMIN. Body { decision: APPROVED | RETURNED, comment? }. SUBMITTED becomes APPROVED, or DRAFT when returned; 409 MARKS_NOT_SUBMITTED otherwise.
   - Submissions and reviews are written to the audit log; GET .../marks returns them as `history`.
 - GET /api/v1/exams and GET /api/v1/exams/:id: ADMIN, HOD and FACULTY see every exam. Everyone else (students) sees only SCHEDULED and COMPLETED exams; a draft or cancelled exam returns 404 EXAM_NOT_FOUND by id, as if it didn't exist.
+- GET /api/v1/exams/me/results (STUDENT) and the student's view of GET /api/v1/exams/:id: a student sees their result, and their paper marks for an exam, only once that result is published. Marks that are still being entered, submitted or reviewed stay with staff.
 - POST /api/v1/exams/:id/calculate-results: ADMIN only, and only once every paper of the exam is APPROVED (otherwise 409 MARKS_NOT_APPROVED).
 - GET /api/v1/exams/review-queue: papers with SUBMITTED marks, oldest first. ADMIN gets every paper in the college; HOD only papers whose semester (and section, if any) is in their department. FACULTY get 403.
 - POST /api/v1/exams/:id/subjects: the subject and the optional section must belong to the given semester; otherwise 400 INVALID_EXAM_SUBJECT. For HOD marks access, both the semester and the section of a paper must be in the HOD's department.
