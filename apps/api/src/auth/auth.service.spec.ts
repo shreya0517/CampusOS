@@ -66,6 +66,17 @@ describe('AuthService', () => {
     await expect(attempt('other@example.test')).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
+  it('counts sign-in attempts as they arrive, so a concurrent burst cannot get past the limit', async () => {
+    const database = createDatabase();
+    database.college.findUnique.mockResolvedValue({ id: 'college-1' });
+    database.user.findUnique.mockResolvedValue(null);
+    const service = new AuthService(database as never);
+    const burst = await Promise.allSettled(Array.from({ length: LOGIN_FAILURE_LIMIT + 5 }, () => service.login({ collegeCode: 'DEMO', email: 'burst@example.test', password: 'wrong-password' })));
+    const refused = burst.filter((outcome) => outcome.status === 'rejected' && (outcome.reason as { status?: number }).status === 429);
+    expect(refused).toHaveLength(5);
+    expect(database.user.findUnique).toHaveBeenCalledTimes(LOGIN_FAILURE_LIMIT);
+  });
+
   it('limits password reset requests per account, whether or not it exists', async () => {
     const database = createDatabase();
     database.college.findUnique.mockResolvedValue(null);

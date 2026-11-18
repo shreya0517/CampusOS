@@ -60,14 +60,16 @@ export class AuthService {
   /**
    * After LOGIN_FAILURE_LIMIT failed attempts on one account within the window, further attempts on it are refused
    * with 429 until the window passes, even with the right password. A successful sign-in clears the count.
+   *
+   * Each attempt is counted as it arrives, before any database work, so a burst of concurrent requests can't all get
+   * past the check; a successful one then clears the count.
    */
   async login(input: LoginDto): Promise<SessionResult> {
     if (!isNonEmpty(input.collegeCode) || !isEmail(input.email) || !isNonEmpty(input.password)) throw genericCredentialsError;
     const key = accountKey(input.collegeCode, input.email);
-    const wait = this.loginFailures.retryAfter(key);
+    const wait = this.loginFailures.take(key);
     if (wait) tooMany(wait, 'failed sign-in attempts');
     const failed = (): never => {
-      this.loginFailures.hit(key);
       throw genericCredentialsError;
     };
     const college = await this.database.college.findUnique({ where: { code: input.collegeCode.trim() } });
@@ -123,10 +125,8 @@ export class AuthService {
   /** Limited per account (RESET_REQUEST_LIMIT an hour), whether or not the account exists, so the limit reveals nothing. */
   async requestPasswordReset(input: ForgotPasswordDto): Promise<void> {
     if (!isNonEmpty(input.collegeCode) || !isEmail(input.email)) return;
-    const key = accountKey(input.collegeCode, input.email);
-    const wait = this.resetRequests.retryAfter(key);
+    const wait = this.resetRequests.take(accountKey(input.collegeCode, input.email));
     if (wait) tooMany(wait, 'password reset requests');
-    this.resetRequests.hit(key);
     const college = await this.database.college.findUnique({ where: { code: input.collegeCode.trim() } });
     const user = college ? await this.database.user.findUnique({ where: { collegeId_email: { collegeId: college.id, email: input.email.trim().toLowerCase() } } }) : null;
     if (user) {
