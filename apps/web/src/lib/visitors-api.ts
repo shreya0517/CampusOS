@@ -15,6 +15,8 @@ export type Visitor = {
   registeredByUserId: string;
   approvedByUserId: string | null;
   approvedAt: string | null;
+  checkedInAt: string | null;
+  checkedOutAt: string | null;
   createdAt: string;
   updatedAt: string;
   registeredBy: { id: string; displayName: string };
@@ -37,11 +39,15 @@ export const registerVisitor = (input: {
 export const listVisitors = (params: URLSearchParams): Promise<VisitorList> =>
   authenticatedRequest(`/visitors?${params}`);
 
-export const listMyVisitors = (params?: URLSearchParams): Promise<VisitorList> =>
-  authenticatedRequest(`/visitors/my${params ? `?${params}` : ''}`);
+/** The caller's own registrations. The API returns a plain list (not a page), newest visit first. */
+export const listMyVisitors = (): Promise<Visitor[]> => authenticatedRequest('/visitors/my');
 
 export const getVisitor = (id: string): Promise<Visitor> =>
   authenticatedRequest(`/visitors/${id}`);
 
 export const reviewVisitor = (id: string, input: { decision: 'APPROVED' | 'REJECTED'; notes?: string }): Promise<Visitor> =>
   authenticatedRequest(`/visitors/${id}/review`, { method: 'PUT', body: JSON.stringify(input) });
+
+/** Front desk: an approved visitor arrives (check in) and leaves (check out). Admin and HOD only. */
+export const checkInVisitor = (id: string): Promise<Visitor> => authenticatedRequest(`/visitors/${id}/check-in`, { method: 'PUT' });
+export const checkOutVisitor = (id: string): Promise<Visitor> => authenticatedRequest(`/visitors/${id}/check-out`, { method: 'PUT' });
