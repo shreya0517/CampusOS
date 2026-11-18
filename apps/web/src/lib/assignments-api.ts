@@ -14,6 +14,8 @@ export type Submission = {
   fileKey: string | null;
   marksAwarded: number | null;
   feedback: string | null;
+  /** Changes whenever the submission does; sent back when grading so a newer version isn't graded unseen. */
+  updatedAt: string;
   student?: SubmissionStudent;
 };
 
@@ -47,12 +49,13 @@ export const updateAssignment = (id: string, input: { title?: string; descriptio
   authenticatedRequest(`/assignments/${id}`, { method: 'PUT', body: JSON.stringify(input) });
 export const deleteAssignment = (id: string): Promise<{ success: boolean }> =>
   authenticatedRequest(`/assignments/${id}`, { method: 'DELETE' });
-export const submitAssignment = (id: string, input: { fileKey?: string; status?: SubmissionStatus }): Promise<Submission> =>
+/** `status: 'DRAFT'` saves without handing in; whether work is late comes from the due date. */
+export const submitAssignment = (id: string, input: { fileKey?: string; status?: 'DRAFT' | 'SUBMITTED' }): Promise<Submission> =>
   authenticatedRequest(`/assignments/${id}/submissions`, { method: 'POST', body: JSON.stringify(input) });
 export const listSubmissions = (id: string): Promise<Submission[]> => authenticatedRequest(`/assignments/${id}/submissions`);
 export const gradeSubmission = (
   assignmentId: string,
   submissionId: string,
-  input: { marksAwarded: number; feedback?: string; status?: SubmissionStatus },
+  input: { marksAwarded: number; feedback?: string; status?: 'GRADED' | 'RETURNED'; version?: string },
 ): Promise<Submission> =>
   authenticatedRequest(`/assignments/${assignmentId}/submissions/${submissionId}/grade`, { method: 'PUT', body: JSON.stringify(input) });

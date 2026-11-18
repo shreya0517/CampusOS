@@ -109,6 +109,8 @@ export default function AssignmentDetailPage() {
       const updated = await gradeSubmission(id, submissionId, {
         marksAwarded: Number(marksInput),
         feedback: feedbackInput.trim() || undefined,
+        // The version shown here, so a resubmission made since then isn't graded unseen.
+        version: submissions.find((s) => s.id === submissionId)?.updatedAt,
       });
       setSubmissions((prev) => prev.map((s) => (s.id === submissionId ? updated : s)));
       setGradingSubmissionId(null);
@@ -224,6 +226,10 @@ export default function AssignmentDetailPage() {
               <p className="text-sm text-[hsl(var(--muted-foreground))]">You have not submitted work for this assignment yet.</p>
             )}
 
+            {/* Graded work is final; the teacher returns it if it needs changes. */}
+            {mySubmission?.status === 'GRADED' ? (
+              <p className="pt-2 text-sm text-[hsl(var(--muted-foreground))]">This work has been graded. Ask your teacher to return it if it needs changes.</p>
+            ) : (
             <form onSubmit={handleSubmitWork} className="grid gap-3 pt-2">
               <label className="block text-xs font-semibold uppercase text-[hsl(var(--muted-foreground))]">
                 {mySubmission ? 'Resubmit / Update Work' : 'Submit Work'}
@@ -242,6 +248,7 @@ export default function AssignmentDetailPage() {
                 <p className="text-xs font-medium text-[hsl(var(--primary))]">{submitMessage}</p>
               )}
             </form>
+            )}
           </CardContent>
         </Card>
       </div>

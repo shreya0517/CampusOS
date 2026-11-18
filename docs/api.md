@@ -159,6 +159,14 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 - GET /api/v1/exams/review-queue: papers with SUBMITTED marks, oldest first. ADMIN gets every paper in the college; HOD only papers whose semester (and section, if any) is in their department. FACULTY get 403.
 - POST /api/v1/exams/:id/subjects: the subject and the optional section must belong to the given semester; otherwise 400 INVALID_EXAM_SUBJECT. For HOD marks access, both the semester and the section of a paper must be in the HOD's department.
 
+## Coursework Submissions
+
+- POST /api/v1/assignments/:id/submissions (STUDENT): `status` may be DRAFT (save without handing in) or SUBMITTED, the default. Anything else is 400. Whether it is LATE comes from the due date, never from the request.
+- Graded work is final (409 SUBMISSION_GRADED) until the teacher returns it. Work that was handed in can't go back to a draft (409 ALREADY_SUBMITTED).
+- Handing in returned work clears the old marks, since it needs grading again; the feedback stays.
+- PUT /api/v1/assignments/:id/submissions/:submissionId/grade: `status` may be GRADED (the default) or RETURNED. Only handed-in work is graded (409 NOT_SUBMITTED for a draft).
+- Both writes apply only if the submission is still in the state it was read in (409 SUBMISSION_CHANGED), so a resubmission and a grade can't overwrite each other.
+
 ## My Classes
 
 - GET /api/v1/classes/mine: ADMIN, HOD and FACULTY. The classes the caller teaches, each with `studentCount` (active enrolment in the section), `sessionsHeld`, `assignmentCount`, `pendingEvaluations` (submissions SUBMITTED or LATE that still need marks) and `attendance` (the same summary shape as the student attendance endpoint).
