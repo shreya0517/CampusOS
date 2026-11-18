@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -22,12 +22,24 @@ export class StorageService {
       });
       this.isMock = false;
     } else {
-      this.logger.warn('AWS credentials not configured or set to placeholder. Operating in S3 mock mode.');
       this.isMock = true;
+      if (process.env.NODE_ENV === 'production') this.logger.error('AWS credentials are not configured: file uploads and downloads are refused until they are set.');
+      else this.logger.warn('AWS credentials not configured or set to placeholder. Operating in S3 mock mode.');
+    }
+  }
+
+  /**
+   * Mock mode hands out fake URLs, which is fine for local development but would make users believe a file was
+   * stored. In production it refuses instead.
+   */
+  private assertConfigured(): void {
+    if (this.isMock && process.env.NODE_ENV === 'production') {
+      throw new ServiceUnavailableException({ code: 'FILES_NOT_CONFIGURED', message: 'File storage is not set up yet.' });
     }
   }
 
   async generatePresignedUploadUrl(storageKey: string, mimeType: string, expiresInSeconds = 900): Promise<string> {
+    this.assertConfigured();
     if (this.isMock || !this.s3Client) {
       return `https://s3.mock.local/${this.bucketName}/${storageKey}?upload=true&expires=${expiresInSeconds}&contentType=${encodeURIComponent(mimeType)}`;
     }
@@ -42,6 +54,7 @@ export class StorageService {
   }
 
   async generatePresignedDownloadUrl(storageKey: string, expiresInSeconds = 3600): Promise<string> {
+    this.assertConfigured();
     if (this.isMock || !this.s3Client) {
       return `https://s3.mock.local/${this.bucketName}/${storageKey}?download=true&expires=${expiresInSeconds}`;
     }

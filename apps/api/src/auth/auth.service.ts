@@ -1,18 +1,40 @@
-import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { createHmac, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { DatabaseService } from '../database.service';
 import { getAuthConfig } from './auth.config';
+import { AttemptLimiter } from './attempt-limiter';
 import type { ChangePasswordDto, ForgotPasswordDto, LoginDto, RegisterDto, ResetPasswordDto } from './auth.dto';
 
 const scrypt = promisify(scryptCallback);
 const genericCredentialsError = new UnauthorizedException({ code: 'INVALID_CREDENTIALS', message: 'Invalid credentials.' });
+
+/** Failed sign-ins allowed per account in the window before further attempts are refused until it passes. */
+export const LOGIN_FAILURE_LIMIT = 10;
+export const LOGIN_FAILURE_WINDOW_MS = 15 * 60_000;
+/** Password-reset requests allowed per account per hour. */
+export const RESET_REQUEST_LIMIT = 5;
+export const RESET_REQUEST_WINDOW_MS = 60 * 60_000;
+
+/** One key per account: the college code and email as typed, normalised. */
+const accountKey = (collegeCode: string, email: string): string => `${collegeCode.trim().toUpperCase()}|${email.trim().toLowerCase()}`;
+const tooMany = (retryAfterMs: number, what: string): never => {
+  const minutes = Math.ceil(retryAfterMs / 60_000);
+  throw new HttpException(
+    { code: 'TOO_MANY_ATTEMPTS', message: `Too many ${what}. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`, retryAfterSeconds: Math.ceil(retryAfterMs / 1000) },
+    HttpStatus.TOO_MANY_REQUESTS,
+  );
+};
 
 export type PublicUser = { id: string; collegeId: string; email: string; displayName: string; emailVerified: boolean; roles: string[] };
 type SessionResult = { accessToken: string; refreshToken: string; user: PublicUser };
 
 @Injectable()
 export class AuthService {
+  // Per account, not per IP: behind a proxy every user can share one IP, so an IP limit would lock everyone out.
+  private readonly loginFailures = new AttemptLimiter(LOGIN_FAILURE_LIMIT, LOGIN_FAILURE_WINDOW_MS);
+  private readonly resetRequests = new AttemptLimiter(RESET_REQUEST_LIMIT, RESET_REQUEST_WINDOW_MS);
+
   constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
 
   /**
@@ -35,15 +57,27 @@ export class AuthService {
     return toPublicUser(user);
   }
 
+  /**
+   * After LOGIN_FAILURE_LIMIT failed attempts on one account within the window, further attempts on it are refused
+   * with 429 until the window passes, even with the right password. A successful sign-in clears the count.
+   */
   async login(input: LoginDto): Promise<SessionResult> {
     if (!isNonEmpty(input.collegeCode) || !isEmail(input.email) || !isNonEmpty(input.password)) throw genericCredentialsError;
+    const key = accountKey(input.collegeCode, input.email);
+    const wait = this.loginFailures.retryAfter(key);
+    if (wait) tooMany(wait, 'failed sign-in attempts');
+    const failed = (): never => {
+      this.loginFailures.hit(key);
+      throw genericCredentialsError;
+    };
     const college = await this.database.college.findUnique({ where: { code: input.collegeCode.trim() } });
-    if (!college) throw genericCredentialsError;
+    if (!college) return failed();
     const user = await this.database.user.findUnique({
       where: { collegeId_email: { collegeId: college.id, email: input.email.trim().toLowerCase() } },
       include: { userRoles: { include: { role: true } }, studentProfiles: true, facultyProfiles: true },
     });
-    if (!user || user.status !== 'ACTIVE' || !user.passwordHash || !user.emailVerifiedAt || !(await verifyPassword(input.password, user.passwordHash))) throw genericCredentialsError;
+    if (!user || user.status !== 'ACTIVE' || !user.passwordHash || !user.emailVerifiedAt || !(await verifyPassword(input.password, user.passwordHash))) return failed();
+    this.loginFailures.reset(key);
     return this.createSession(user);
   }
 
@@ -86,8 +120,13 @@ export class AuthService {
     });
   }
 
+  /** Limited per account (RESET_REQUEST_LIMIT an hour), whether or not the account exists, so the limit reveals nothing. */
   async requestPasswordReset(input: ForgotPasswordDto): Promise<void> {
     if (!isNonEmpty(input.collegeCode) || !isEmail(input.email)) return;
+    const key = accountKey(input.collegeCode, input.email);
+    const wait = this.resetRequests.retryAfter(key);
+    if (wait) tooMany(wait, 'password reset requests');
+    this.resetRequests.hit(key);
     const college = await this.database.college.findUnique({ where: { code: input.collegeCode.trim() } });
     const user = college ? await this.database.user.findUnique({ where: { collegeId_email: { collegeId: college.id, email: input.email.trim().toLowerCase() } } }) : null;
     if (user) {
@@ -162,8 +201,8 @@ export class AuthService {
     if (!session || session.collegeId !== payload.collegeId || session.userId !== payload.sub || session.revokedAt || session.expiresAt <= new Date() || session.user.status !== 'ACTIVE' || !session.user.emailVerifiedAt) throw new UnauthorizedException({ code: 'SESSION_EXPIRED', message: 'Session expired.' });
     return toPublicUser(session.user);
   }
-  private logDevelopmentVerification(email: string, token: string): void { if (!getAuthConfig().isProduction) console.info(`[CampusOS development] Verify ${email}: POST /api/v1/auth/verify-email with {"token":"${token}"}`); }
-  private logDevelopmentPasswordReset(email: string, token: string): void { if (!getAuthConfig().isProduction) console.info(`[CampusOS development] Reset password for ${email}: POST /api/v1/auth/reset-password with {"token":"${token}","password":"<new password>"}`); }
+  private logDevelopmentVerification(email: string, token: string): void { if (getAuthConfig().logTokens) console.info(`[CampusOS development] Verify ${email}: POST /api/v1/auth/verify-email with {"token":"${token}"}`); }
+  private logDevelopmentPasswordReset(email: string, token: string): void { if (getAuthConfig().logTokens) console.info(`[CampusOS development] Reset password for ${email}: POST /api/v1/auth/reset-password with {"token":"${token}","password":"<new password>"}`); }
 }
 
 export type AccessPayload = { sub: string; collegeId: string; sid: string; exp: number };

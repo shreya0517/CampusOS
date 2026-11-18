@@ -1,5 +1,6 @@
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
-import { AuthService, hashPassword, verifyPassword } from './auth.service';
+import { AuthService, hashPassword, LOGIN_FAILURE_LIMIT, RESET_REQUEST_LIMIT, verifyPassword } from './auth.service';
+import { getAuthConfig } from './auth.config';
 
 const activeUser = { id: 'user-1', collegeId: 'college-1', email: 'user@example.test', displayName: 'Test User', status: 'ACTIVE', emailVerifiedAt: new Date(), passwordHash: '' };
 const activeSession = { id: 'session-1', collegeId: 'college-1', userId: 'user-1', refreshTokenHash: 'stored', expiresAt: new Date(Date.now() + 60_000), revokedAt: null, user: activeUser };
@@ -48,6 +49,43 @@ describe('AuthService', () => {
     process.env.ALLOW_SELF_REGISTRATION = 'true';
     expect(database.college.findUnique).not.toHaveBeenCalled();
     expect(database.user.create).not.toHaveBeenCalled();
+  });
+
+  it('stops sign-in attempts on an account after too many failures, and clears the count on success', async () => {
+    const database = createDatabase();
+    database.college.findUnique.mockResolvedValue({ id: 'college-1' });
+    database.user.findUnique.mockResolvedValue(null);
+    const service = new AuthService(database as never);
+    const attempt = (email = 'user@example.test') => service.login({ collegeCode: 'demo', email, password: 'wrong-password' });
+    for (let i = 0; i < LOGIN_FAILURE_LIMIT; i += 1) await expect(attempt()).rejects.toBeInstanceOf(UnauthorizedException);
+    // The next attempt is refused before the database is asked, whatever the password.
+    database.user.findUnique.mockClear();
+    await expect(attempt(' USER@example.test ')).rejects.toMatchObject({ status: 429, response: { code: 'TOO_MANY_ATTEMPTS' } });
+    expect(database.user.findUnique).not.toHaveBeenCalled();
+    // Another account isn't affected.
+    await expect(attempt('other@example.test')).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('limits password reset requests per account, whether or not it exists', async () => {
+    const database = createDatabase();
+    database.college.findUnique.mockResolvedValue(null);
+    const service = new AuthService(database as never);
+    for (let i = 0; i < RESET_REQUEST_LIMIT; i += 1) await expect(service.requestPasswordReset({ collegeCode: 'DEMO', email: 'nobody@example.test' })).resolves.toBeUndefined();
+    await expect(service.requestPasswordReset({ collegeCode: 'DEMO', email: 'nobody@example.test' })).rejects.toMatchObject({ status: 429 });
+  });
+
+  it('logs development tokens only with AUTH_LOG_TOKENS, and never in production', () => {
+    const env = { ...process.env };
+    try {
+      delete process.env.AUTH_LOG_TOKENS;
+      expect(getAuthConfig().logTokens).toBe(false);
+      process.env.AUTH_LOG_TOKENS = 'true';
+      expect(getAuthConfig().logTokens).toBe(true);
+      process.env.NODE_ENV = 'production';
+      expect(getAuthConfig().logTokens).toBe(false);
+    } finally {
+      process.env = env;
+    }
   });
 
   it('rejects invalid registration input before persistence', async () => {

@@ -5,6 +5,12 @@ export type AuthConfig = {
   isProduction: boolean;
   /** Public sign-up with a college code. Off unless ALLOW_SELF_REGISTRATION=true: colleges create their own accounts. */
   allowSelfRegistration: boolean;
+  /**
+   * Print verification and password-reset tokens to the console, for local development without an email sender.
+   * Only with AUTH_LOG_TOKENS=true, and never in production: a staging server without NODE_ENV=production must not
+   * write live tokens to its logs.
+   */
+  logTokens: boolean;
 };
 
 export const getAuthConfig = (): AuthConfig => {
@@ -19,6 +25,7 @@ export const getAuthConfig = (): AuthConfig => {
     refreshTokenTtlDays: positiveInteger(process.env.AUTH_REFRESH_TOKEN_TTL_DAYS, 30),
     isProduction: process.env.NODE_ENV === 'production',
     allowSelfRegistration: process.env.ALLOW_SELF_REGISTRATION === 'true',
+    logTokens: process.env.AUTH_LOG_TOKENS === 'true' && process.env.NODE_ENV !== 'production',
   };
 };
 
