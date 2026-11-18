@@ -179,6 +179,15 @@ describe('AssignmentsService', () => {
     await expect(service.gradeSubmission('ass-1', 'sub-1', { marksAwarded: 5 }, faculty)).rejects.toMatchObject({ response: { code: 'SUBMISSION_CHANGED' } });
   });
 
+  it("shows a class's teacher by name only, without employee code or account id", async () => {
+    database.assignment.findFirst.mockResolvedValue(mockAssignment);
+    database.student.findFirst.mockResolvedValue(mockStudent);
+    database.submission.findFirst.mockResolvedValue(null);
+    await service.getAssignment('ass-1', student).catch(() => undefined);
+    const include = (database.assignment.findFirst.mock.calls[0]?.[0] as { include: { class: { include: { faculty: unknown } } } }).include;
+    expect(include.class.include.faculty).toEqual({ select: { id: true, firstName: true, lastName: true } });
+  });
+
   it('rejects grade exceeding maxMarks', async () => {
     database.assignment.findFirst.mockResolvedValue(mockAssignment);
     database.class.findFirst.mockResolvedValue(mockClass);

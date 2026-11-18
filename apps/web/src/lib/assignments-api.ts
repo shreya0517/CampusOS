@@ -20,7 +20,8 @@ export type Submission = {
 };
 
 export type ClassSubject = { id: string; name: string; code: string };
-export type ClassFaculty = { id: string; firstName: string; lastName: string; employeeCode: string } | null;
+/** The teacher's name; class responses don't carry the employee code. */
+export type ClassFaculty = { id: string; firstName: string; lastName: string; employeeCode?: string } | null;
 export type ClassSection = { id: string; code: string; semester: { id: string; name: string; course: { id: string; name: string; code: string; department: { id: string; name: string; code: string } } } };
 export type ClassRecord = { id: string; collegeId: string; sectionId: string; subjectId: string; facultyId: string | null; section: ClassSection; subject: ClassSubject; faculty: ClassFaculty };
 

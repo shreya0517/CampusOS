@@ -72,7 +72,7 @@ describe('ExamsService', () => {
   beforeEach(() => jest.clearAllMocks());
 
   it('validates DTO parsing', () => {
-    expect(() => parseCreateExamDto({})).toThrow();
+    expect(() => parseCreateExamDto({})).toThrow(BadRequestException);
     expect(() => parseCreateExamDto({ name: 'Exam 1', startsOn: 'invalid-date', endsOn: '2026-10-10' })).toThrow();
     expect(() => parseCreateExamSubjectDto({ maxMarks: 100, passMarks: 150 })).toThrow();
     expect(() => parseUpdateMarksDto({ marks: [{ studentId: 's1', marksObtained: -10 }] })).toThrow();

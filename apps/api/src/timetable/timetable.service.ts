@@ -40,6 +40,9 @@ function timeToMinutes(dateOrStr: Date | string): number {
   return d.getUTCHours() * 60 + d.getUTCMinutes();
 }
 
+/** The teacher is shown by name: students see the timetable, so employee codes and account ids stay out. */
+const FACULTY_NAME = { select: { id: true, firstName: true, lastName: true } } as const;
+
 @Injectable()
 export class TimetableService {
   constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
@@ -52,7 +55,7 @@ export class TimetableService {
       where: { id: input.classId, collegeId: context.collegeId },
       include: {
         subject: true,
-        faculty: true,
+        faculty: FACULTY_NAME,
       },
     });
 
@@ -90,7 +93,7 @@ export class TimetableService {
       include: {
         class: {
           include: {
-            faculty: true,
+            faculty: FACULTY_NAME,
             subject: true,
           },
         },
@@ -148,7 +151,7 @@ export class TimetableService {
           include: {
             subject: true,
             section: true,
-            faculty: true,
+            faculty: FACULTY_NAME,
           },
         },
         room: true,
@@ -227,7 +230,7 @@ export class TimetableService {
                 },
               },
             },
-            faculty: true,
+            faculty: FACULTY_NAME,
           },
         },
         room: true,
@@ -281,7 +284,7 @@ export class TimetableService {
             include: {
               subject: true,
               section: true,
-              faculty: true,
+              faculty: FACULTY_NAME,
             },
           },
           room: true,
@@ -314,7 +317,7 @@ export class TimetableService {
             include: {
               subject: true,
               section: true,
-              faculty: true,
+              faculty: FACULTY_NAME,
             },
           },
           room: true,
@@ -335,7 +338,7 @@ export class TimetableService {
           include: {
             subject: true,
             section: true,
-            faculty: true,
+            faculty: FACULTY_NAME,
           },
         },
         room: true,
@@ -375,7 +378,7 @@ export class TimetableService {
       include: {
         subject: true,
         section: true,
-        faculty: true,
+        faculty: FACULTY_NAME,
       },
       orderBy: { createdAt: 'desc' },
     });
