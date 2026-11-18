@@ -11,17 +11,11 @@ import { Input, Select } from '@/components/ui/form-field';
 import { Table, TableCell, TableHead } from '@/components/ui/table';
 import { getAttendanceReport } from '@/lib/attendance-api';
 import type { AttendanceReport } from '@/lib/attendance-api';
+import { downloadCsv } from '@/lib/csv';
 import { listDepartments } from '@/lib/faculty-api';
 import type { Department } from '@/lib/faculty-api';
 
 const monthLabel = (month: string): string => new Date(`${month}-01T00:00:00Z`).toLocaleDateString('en-IN', { month: 'short', year: 'numeric', timeZone: 'UTC' });
-
-/** Quotes each cell and neutralises values a spreadsheet would run as formulas. */
-const csvCell = (value: string | number | null): string => {
-  const text = value === null ? '' : String(value);
-  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
-  return `"${safe.replace(/"/g, '""')}"`;
-};
 
 function Figure({ label, value, sub, tone }: { label: string; value: string | number; sub?: string; tone?: string }) {
   return (
@@ -75,13 +69,7 @@ export default function AttendanceReportPage() {
       ['Student code', 'Student', 'Section', 'Attended', 'Counted', 'Attendance %'],
       ...report.shortages.map((row) => [row.student.studentCode, row.student.name, row.section, row.attended, row.counted, row.percentage]),
     ];
-    const blob = new Blob([rows.map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `attendance-shortages-${report.range.from}-to-${report.range.to}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+    downloadCsv(`attendance-shortages-${report.range.from}-to-${report.range.to}.csv`, rows);
   };
 
   const classesShort = report?.byClass.filter((row) => row.belowThreshold).length ?? 0;
