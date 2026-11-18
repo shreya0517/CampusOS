@@ -89,25 +89,32 @@ export function parseCreateExamDto(body: unknown): CreateExamDto {
   };
 }
 
+/**
+ * An edit may leave fields out, but a field that is sent must be valid: a blank name, an unreadable date or an
+ * unknown status is a 400, not silently dropped (which would report success for a change that wasn't made).
+ */
 export function parseUpdateExamDto(body: unknown): UpdateExamDto {
   const b = (body ?? {}) as Record<string, unknown>;
   const result: UpdateExamDto = {};
 
-  if (typeof b.name === 'string' && b.name.trim()) {
+  if (b.name !== undefined) {
+    if (typeof b.name !== 'string' || !b.name.trim()) invalid('Exam name cannot be blank');
     result.name = b.name.trim();
   }
-  if (typeof b.startsOn === 'string' && !isNaN(Date.parse(b.startsOn))) {
+  if (b.startsOn !== undefined) {
+    if (typeof b.startsOn !== 'string' || isNaN(Date.parse(b.startsOn))) invalid('startsOn must be a valid date');
     result.startsOn = b.startsOn;
   }
-  if (typeof b.endsOn === 'string' && !isNaN(Date.parse(b.endsOn))) {
+  if (b.endsOn !== undefined) {
+    if (typeof b.endsOn !== 'string' || isNaN(Date.parse(b.endsOn))) invalid('endsOn must be a valid date');
     result.endsOn = b.endsOn;
   }
-  if (typeof b.status === 'string') {
-    const s = b.status.toUpperCase();
-    if (Object.values(ExamStatus).includes(s as ExamStatus)) {
-      result.status = s as ExamStatus;
-    }
+  if (b.status !== undefined) {
+    const s = typeof b.status === 'string' ? b.status.toUpperCase() : '';
+    if (!Object.values(ExamStatus).includes(s as ExamStatus)) invalid('status is not a valid exam status');
+    result.status = s as ExamStatus;
   }
+  if (result.startsOn && result.endsOn && Date.parse(result.endsOn) < Date.parse(result.startsOn)) invalid('endsOn must be on or after startsOn');
 
   return result;
 }

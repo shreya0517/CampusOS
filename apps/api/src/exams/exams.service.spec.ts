@@ -4,6 +4,7 @@ import { ExamsService } from './exams.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
 import {
   parseCreateExamDto,
+  parseUpdateExamDto,
   parseCreateExamSubjectDto,
   parseExamListQuery,
   parseReviewMarksDto,
@@ -73,6 +74,11 @@ describe('ExamsService', () => {
 
   it('validates DTO parsing', () => {
     expect(() => parseCreateExamDto({})).toThrow(BadRequestException);
+    // An edit rejects a field it was sent but can't use, instead of dropping it.
+    for (const bad of [{ name: '  ' }, { startsOn: 'soon' }, { endsOn: 42 }, { status: 'DONE' }, { startsOn: '2026-12-10', endsOn: '2026-12-01' }]) {
+      expect(() => parseUpdateExamDto(bad)).toThrow(BadRequestException);
+    }
+    expect(parseUpdateExamDto({ name: ' Finals ', status: 'scheduled' })).toEqual({ name: 'Finals', status: ExamStatus.SCHEDULED });
     expect(() => parseCreateExamDto({ name: 'Exam 1', startsOn: 'invalid-date', endsOn: '2026-10-10' })).toThrow();
     expect(() => parseCreateExamSubjectDto({ maxMarks: 100, passMarks: 150 })).toThrow();
     expect(() => parseUpdateMarksDto({ marks: [{ studentId: 's1', marksObtained: -10 }] })).toThrow();
