@@ -56,17 +56,17 @@ export class VisitorsService {
       include: visitorInclude,
     });
     // Approvers: every Admin, and the HOD of the host's department (or the registrant's, when no host is named).
-    if (this.notifications) {
+    await this.notifications?.safely(async (notifications) => {
       const departmentUser = input.hostUserId ?? context.userId;
       const profile = await this.database.faculty.findFirst({ where: { collegeId: context.collegeId, userId: departmentUser }, select: { departmentId: true } });
-      const [admins, hods] = await Promise.all([this.notifications.usersWithRoles(context.collegeId, ['ADMIN']), this.notifications.hodsOf(context.collegeId, profile?.departmentId)]);
-      await this.notifications.notify(context.collegeId, [...admins, ...hods].filter((id) => id !== context.userId), {
+      const [admins, hods] = await Promise.all([notifications.usersWithRoles(context.collegeId, ['ADMIN']), notifications.hodsOf(context.collegeId, profile?.departmentId)]);
+      await notifications.notify(context.collegeId, [...admins, ...hods].filter((id) => id !== context.userId), {
         category: 'VISITOR',
         title: `Visitor approval requested: ${input.name}`,
         body: `${input.purpose} · ${input.visitDate.toISOString().slice(0, 10)}`,
         link: '/dashboard/visitors',
       });
-    }
+    });
     return visitor;
   }
 

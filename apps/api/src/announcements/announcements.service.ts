@@ -61,19 +61,21 @@ export class AnnouncementsService {
     });
     // Everyone in the audience is told now; an announcement scheduled for later is not (there is no scheduler yet).
     const published = announcement.publishedAt !== null && announcement.publishedAt <= new Date();
-    if (this.notifications && published) {
+    if (published) {
       const roles: Record<AnnouncementAudience, string[]> = {
         ALL: ['ADMIN', 'HOD', 'FACULTY', 'STUDENT'],
         STUDENTS: ['STUDENT'],
         FACULTY: ['HOD', 'FACULTY'],
         STAFF: ['ADMIN', 'HOD', 'FACULTY'],
       };
-      const users = await this.notifications.usersWithRoles(context.collegeId, roles[announcement.audience]);
-      await this.notifications.notify(context.collegeId, users.filter((id) => id !== context.userId), {
-        category: 'ANNOUNCEMENT',
-        title: `Announcement: ${announcement.title}`,
-        body: announcement.body.length > 160 ? `${announcement.body.slice(0, 157)}...` : announcement.body,
-        link: '/dashboard/announcements',
+      await this.notifications?.safely(async (notifications) => {
+        const users = await notifications.usersWithRoles(context.collegeId, roles[announcement.audience]);
+        await notifications.notify(context.collegeId, users.filter((id) => id !== context.userId), {
+          category: 'ANNOUNCEMENT',
+          title: `Announcement: ${announcement.title}`,
+          body: announcement.body.length > 160 ? `${announcement.body.slice(0, 157)}...` : announcement.body,
+          link: '/dashboard/announcements',
+        });
       });
     }
     return announcement;

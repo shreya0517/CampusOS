@@ -54,6 +54,18 @@ export class NotificationsService {
     }
   }
 
+  /**
+   * Runs a producer's recipient lookups and notify calls without letting a failure reach the caller: the action that
+   * raised the notification has already been saved, so an error here must not turn into a failed (and retried) request.
+   */
+  async safely(work: (notifications: NotificationsService) => Promise<void>): Promise<void> {
+    try {
+      await work(this);
+    } catch (error) {
+      this.logger.error(`Could not send notifications: ${(error as Error).message}`);
+    }
+  }
+
   /** Active users holding any of the given roles in the college. */
   async usersWithRoles(collegeId: string, roles: string[]): Promise<string[]> {
     const users = await this.database.user.findMany({ where: { collegeId, status: 'ACTIVE', userRoles: { some: { role: { name: { in: roles } } } } }, select: { id: true } });

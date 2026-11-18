@@ -210,7 +210,7 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 
 ## Notifications
 
-Every signed-in user (ADMIN, HOD, FACULTY, STUDENT) reads and marks only their own notifications; the user always comes from the session.
+Every signed-in user (SUPER_ADMIN, ADMIN, HOD, FACULTY, STUDENT) reads and marks only their own notifications; the user always comes from the session.
 
 - GET /api/v1/notifications?category=&unread=true&page=&pageSize=: newest first, with `total` and the caller's `unread` count. Categories: TASK, ATTENDANCE, EXAM, ASSIGNMENT, FEE, VISITOR, ANNOUNCEMENT, ACCOUNT, SYSTEM.
 - GET /api/v1/notifications/unread-count: `{ unread }`.
@@ -234,4 +234,4 @@ Raised today:
 | Assignment graded or returned | The student |
 | Announcement published now | Everyone in its audience (scheduled ones are not announced: there is no scheduler yet) |
 
-The actor is never notified about their own action. Storing notifications never fails or undoes the action that raised them; errors are logged.
+The actor is never notified about their own action. Finding the recipients and storing notifications never fails or undoes the action that raised them; errors are logged.

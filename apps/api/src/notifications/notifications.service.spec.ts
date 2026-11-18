@@ -44,6 +44,15 @@ describe('NotificationsService', () => {
     await expect(service.notify('col-a', ['user-1'], { category: 'TASK', title: 'x', body: 'y' })).resolves.toBeUndefined();
   });
 
+  it('keeps lookup failures inside safely()', async () => {
+    const { service } = createService();
+    await expect(
+      service.safely(async () => {
+        throw new Error('lookup failed');
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it('does nothing without recipients', async () => {
     const { database, service } = createService();
     await service.notify('col-a', [], { category: 'TASK', title: 'x', body: 'y' });
@@ -75,7 +84,7 @@ describe('NotificationsService', () => {
 
 describe('notification producers', () => {
   it('tells the announcement audience, but not the author and not for a scheduled one', async () => {
-    const notifications = { notify: jest.fn(), usersWithRoles: jest.fn().mockResolvedValue(['user-admin', 'user-stu-1', 'user-stu-2']) };
+    const notifications = { notify: jest.fn(), usersWithRoles: jest.fn().mockResolvedValue(['user-admin', 'user-stu-1', 'user-stu-2']), safely: (work: (n: unknown) => Promise<void>) => work(notifications) };
     const created = { id: 'a1', title: 'Holiday', body: 'College closed on Friday.', audience: 'STUDENTS', publishedAt: new Date(Date.now() - 1000) };
     const database = { announcement: { create: jest.fn().mockResolvedValue(created) } };
     const service = new AnnouncementsService(database as never, notifications as never);
@@ -87,10 +96,17 @@ describe('notification producers', () => {
     database.announcement.create.mockResolvedValue({ ...created, publishedAt: new Date(Date.now() + 86_400_000) });
     await service.create({ title: 'Later', body: 'Soon', audience: 'ALL' } as never, admin);
     expect(notifications.notify).not.toHaveBeenCalled();
+
+    // A failing recipient lookup doesn't fail the request: the announcement is saved and returned.
+    const real = new NotificationsService({} as never, { emitToUser: jest.fn() } as never);
+    type Fake = { usersWithRoles: jest.Mock; notify: jest.Mock; safely: (work: (n: Fake) => Promise<void>) => Promise<void> };
+    const failing: Fake = { usersWithRoles: jest.fn().mockRejectedValue(new Error('db down')), notify: jest.fn(), safely: (work) => real.safely(() => work(failing)) };
+    database.announcement.create.mockResolvedValue(created);
+    await expect(new AnnouncementsService(database as never, failing as never).create({ title: 'Holiday', body: 'x', audience: 'STUDENTS' } as never, admin)).resolves.toMatchObject({ id: 'a1' });
   });
 
   it("asks every Admin and the host department's HOD to approve a visitor, and tells the registrant the outcome", async () => {
-    const notifications = { notify: jest.fn(), usersWithRoles: jest.fn().mockResolvedValue(['user-admin']), hodsOf: jest.fn().mockResolvedValue(['user-hod']) };
+    const notifications = { notify: jest.fn(), usersWithRoles: jest.fn().mockResolvedValue(['user-admin']), hodsOf: jest.fn().mockResolvedValue(['user-hod']), safely: (work: (n: unknown) => Promise<void>) => work(notifications) };
     const visitor = { id: 'v1', name: 'Ramesh', registeredByUserId: 'user-fac', status: 'PENDING', visitDate: new Date('2026-11-20') };
     const database = {
       visitor: { create: jest.fn().mockResolvedValue(visitor), findFirst: jest.fn().mockResolvedValue(visitor), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },

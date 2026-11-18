@@ -251,13 +251,15 @@ export class AssignmentsService {
       include: submissionInclude,
     });
     // A saved draft isn't handed in yet, so only a real submission reaches the faculty member.
-    if (this.notifications && computedStatus !== SubmissionStatus.DRAFT) {
-      const owner = await this.database.class.findFirst({ where: { id: assignment.classId, collegeId: context.collegeId }, select: { faculty: { select: { userId: true } } } });
-      await this.notifications.notify(context.collegeId, [owner?.faculty?.userId], {
-        category: 'ASSIGNMENT',
-        title: `New submission: ${assignment.title}`,
-        body: `${studentProfile!.firstName} ${studentProfile!.lastName} (${studentProfile!.studentCode})${computedStatus === SubmissionStatus.LATE ? ' submitted late.' : ' submitted their work.'}`,
-        link: `/dashboard/assignments/${assignmentId}`,
+    if (computedStatus !== SubmissionStatus.DRAFT) {
+      await this.notifications?.safely(async (notifications) => {
+        const owner = await this.database.class.findFirst({ where: { id: assignment.classId, collegeId: context.collegeId }, select: { faculty: { select: { userId: true } } } });
+        await notifications.notify(context.collegeId, [owner?.faculty?.userId], {
+          category: 'ASSIGNMENT',
+          title: `New submission: ${assignment.title}`,
+          body: `${studentProfile!.firstName} ${studentProfile!.lastName} (${studentProfile!.studentCode})${computedStatus === SubmissionStatus.LATE ? ' submitted late.' : ' submitted their work.'}`,
+          link: `/dashboard/assignments/${assignmentId}`,
+        });
       });
     }
     return submission;
@@ -299,16 +301,16 @@ export class AssignmentsService {
       },
       include: submissionInclude,
     });
-    if (this.notifications) {
+    await this.notifications?.safely(async (notifications) => {
       const returned = (input.status ?? SubmissionStatus.GRADED) === SubmissionStatus.RETURNED;
-      const students = await this.notifications.studentUsers(context.collegeId, [existing!.studentId]);
-      await this.notifications.notify(context.collegeId, students, {
+      const students = await notifications.studentUsers(context.collegeId, [existing!.studentId]);
+      await notifications.notify(context.collegeId, students, {
         category: 'ASSIGNMENT',
         title: returned ? `Assignment returned: ${assignment.title}` : `Assignment graded: ${assignment.title}`,
         body: `${input.marksAwarded}/${assignment.maxMarks}${input.feedback ? ` · ${input.feedback}` : ''}`,
         link: `/dashboard/assignments/${assignmentId}`,
       });
-    }
+    });
     return graded;
   }
 }

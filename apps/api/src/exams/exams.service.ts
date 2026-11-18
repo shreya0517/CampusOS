@@ -402,17 +402,18 @@ export class ExamsService {
       await tx.auditLog.create({ data: { collegeId: context.collegeId, actorId: context.userId, action: 'MARKS_SUBMITTED', entityType: 'ExamSubject', entityId: examSubjectId } });
     });
     // Reviewers: the HOD of the paper's department, or every Admin when the department has no HOD.
-    const paper = this.notifications ? await this.paperInfo(examSubjectId, context.collegeId) : null;
-    if (this.notifications && paper) {
-      const hods = await this.notifications.hodsOf(context.collegeId, paper.semester.course.departmentId);
-      const reviewers = hods.length ? hods : await this.notifications.usersWithRoles(context.collegeId, ['ADMIN']);
-      await this.notifications.notify(context.collegeId, reviewers.filter((id) => id !== context.userId), {
+    await this.notifications?.safely(async (notifications) => {
+      const paper = await this.paperInfo(examSubjectId, context.collegeId);
+      if (!paper) return;
+      const hods = await notifications.hodsOf(context.collegeId, paper.semester.course.departmentId);
+      const reviewers = hods.length ? hods : await notifications.usersWithRoles(context.collegeId, ['ADMIN']);
+      await notifications.notify(context.collegeId, reviewers.filter((id) => id !== context.userId), {
         category: 'EXAM',
         title: `Marks submitted for review: ${paper.subject.name}`,
         body: `${paper.exam.name} · approve them or return them for changes.`,
         link: `/dashboard/exams/${paper.examId}/subjects/${paper.id}/marks`,
       });
-    }
+    });
     return this.getSubjectMarks(examSubjectId, context);
   }
 
@@ -437,20 +438,19 @@ export class ExamsService {
       });
     });
     // The person who submitted the marks hears the outcome.
-    if (this.notifications) {
+    await this.notifications?.safely(async (notifications) => {
       const [submission, paper] = await Promise.all([
         this.database.auditLog.findFirst({ where: { collegeId: context.collegeId, entityType: 'ExamSubject', entityId: examSubjectId, action: 'MARKS_SUBMITTED' }, orderBy: { createdAt: 'desc' }, select: { actorId: true } }),
         this.paperInfo(examSubjectId, context.collegeId),
       ]);
-      if (paper) {
-        await this.notifications.notify(context.collegeId, [submission?.actorId].filter((id) => id && id !== context.userId), {
-          category: 'EXAM',
-          title: approved ? `Marks approved: ${paper.subject.name}` : `Marks returned for changes: ${paper.subject.name}`,
-          body: input.comment ? `${paper.exam.name} · ${input.comment}` : paper.exam.name,
-          link: `/dashboard/exams/${paper.examId}/subjects/${paper.id}/marks`,
-        });
-      }
-    }
+      if (!paper) return;
+      await notifications.notify(context.collegeId, [submission?.actorId].filter((id) => id && id !== context.userId), {
+        category: 'EXAM',
+        title: approved ? `Marks approved: ${paper.subject.name}` : `Marks returned for changes: ${paper.subject.name}`,
+        body: input.comment ? `${paper.exam.name} · ${input.comment}` : paper.exam.name,
+        link: `/dashboard/exams/${paper.examId}/subjects/${paper.id}/marks`,
+      });
+    });
     return this.getSubjectMarks(examSubjectId, context);
   }
 
@@ -630,10 +630,10 @@ export class ExamsService {
       });
     });
 
-    if (this.notifications) {
-      const students = await this.notifications.studentUsers(context.collegeId, [...studentMarksMap.keys()]);
-      await this.notifications.notify(context.collegeId, students, { category: 'EXAM', title: `Results published: ${exam.name}`, body: 'Your result is now available.', link: '/dashboard/exams/me' });
-    }
+    await this.notifications?.safely(async (notifications) => {
+      const students = await notifications.studentUsers(context.collegeId, [...studentMarksMap.keys()]);
+      await notifications.notify(context.collegeId, students, { category: 'EXAM', title: `Results published: ${exam.name}`, body: 'Your result is now available.', link: '/dashboard/exams/me' });
+    });
     return { success: true, processedStudents: studentMarksMap.size };
   }
 
