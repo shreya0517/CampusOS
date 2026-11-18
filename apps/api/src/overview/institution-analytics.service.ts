@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import type { SubmissionStatus } from '@prisma/client';
 import { DatabaseService } from '../database.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
 import { ATTENDANCE_THRESHOLD_PERCENT, count, emptyTally, summarize } from '../attendance/attendance.service';
@@ -14,7 +15,8 @@ export const ANALYTICS_MAX_DAYS = 366;
 
 const DAY_MS = 86_400_000;
 const OPEN_INVOICE_STATUSES = new Set(['ISSUED', 'PARTIALLY_PAID', 'OVERDUE']);
-const SUBMITTED = new Set(['SUBMITTED', 'LATE', 'GRADED', 'RETURNED']);
+/** A submission in any of these states has been handed in (drafts haven't). */
+const SUBMITTED: SubmissionStatus[] = ['SUBMITTED', 'LATE', 'GRADED', 'RETURNED'];
 const GRADED = new Set(['GRADED', 'RETURNED']);
 
 type SectionInfo = { semesterNumber: number; courseId: string; departmentId: string };
@@ -362,8 +364,8 @@ export class InstitutionAnalyticsService {
   /**
    * Assignment completion and exam performance.
    *
-   * Completion covers assignments whose due date fell in the range and has passed: submissions (on time or late) out of
-   * the students now actively enrolled in the class's section. Exam performance has two views: published results (a
+   * Completion covers assignments whose due date fell in the range and has passed: submissions (on time or late) from
+   * the students now actively enrolled in the class's section, out of those students. Exam performance has two views: published results (a
    * student passes an exam by passing every paper), and approved marks paper by paper, which can be split by department
    * and semester and are available before results are published.
    */
@@ -386,7 +388,10 @@ export class InstitutionAnalyticsService {
     const examIds = exams.map((exam) => exam.id);
     const [submissions, papers, results] = await Promise.all([
       assignments.length
-        ? this.database.submission.groupBy({ by: ['assignmentId', 'status'], where: { collegeId: scope.collegeId, assignmentId: { in: assignments.map((assignment) => assignment.id) } }, _count: { _all: true } })
+        ? this.database.submission.findMany({
+            where: { collegeId: scope.collegeId, assignmentId: { in: assignments.map((assignment) => assignment.id) }, status: { in: SUBMITTED } },
+            select: { assignmentId: true, studentId: true, status: true },
+          })
         : Promise.resolve([]),
       examIds.length
         ? this.database.examSubject.findMany({
@@ -403,28 +408,30 @@ export class InstitutionAnalyticsService {
       ? await this.database.mark.findMany({ where: { collegeId: scope.collegeId, examSubjectId: { in: approved.map((paper) => paper.id) } }, select: { examSubjectId: true, marksObtained: true, isAbsent: true } })
       : [];
 
-    // Assignments: the expected count is each class section's active enrollment; extra submissions (from students who
-    // have since left) are not counted beyond it.
-    const activeBySection = new Map<string, number>();
-    for (const enrollment of scope.enrollments) if (enrollment.status === 'ACTIVE') bump(activeBySection, enrollment.sectionId);
+    // Assignments: the students expected are each class section's active enrollment, and only their submissions count,
+    // so a submission from a student who has since left never stands in for a current student who hasn't submitted.
+    const activeBySection = new Map<string, Set<string>>();
+    for (const enrollment of scope.enrollments) if (enrollment.status === 'ACTIVE') addTo(activeBySection, enrollment.sectionId, enrollment.studentId);
+    const sectionOf = new Map(assignments.map((assignment) => [assignment.id, assignment.class.sectionId]));
     const perAssignment = new Map<string, { submitted: number; late: number; graded: number }>();
-    for (const row of submissions) {
-      const entry = perAssignment.get(row.assignmentId) ?? { submitted: 0, late: 0, graded: 0 };
-      if (SUBMITTED.has(row.status)) entry.submitted += row._count._all;
-      if (row.status === 'LATE') entry.late += row._count._all;
-      if (GRADED.has(row.status)) entry.graded += row._count._all;
-      perAssignment.set(row.assignmentId, entry);
+    for (const submission of submissions) {
+      const sectionId = sectionOf.get(submission.assignmentId);
+      if (!sectionId || !activeBySection.get(sectionId)?.has(submission.studentId)) continue;
+      const entry = perAssignment.get(submission.assignmentId) ?? { submitted: 0, late: 0, graded: 0 };
+      entry.submitted += 1;
+      if (submission.status === 'LATE') entry.late += 1;
+      if (GRADED.has(submission.status)) entry.graded += 1;
+      perAssignment.set(submission.assignmentId, entry);
     }
     const work = { due: assignments.length, expected: 0, submitted: 0, late: 0, graded: 0 };
     const assignmentsByDepartment = new Map<string, { expected: number; submitted: number }>();
     for (const assignment of assignments) {
-      const expected = activeBySection.get(assignment.class.sectionId) ?? 0;
-      const entry = perAssignment.get(assignment.id) ?? { submitted: 0, late: 0, graded: 0 };
-      const submitted = Math.min(expected, entry.submitted);
+      const expected = activeBySection.get(assignment.class.sectionId)?.size ?? 0;
+      const { submitted, late, graded } = perAssignment.get(assignment.id) ?? { submitted: 0, late: 0, graded: 0 };
       work.expected += expected;
       work.submitted += submitted;
-      work.late += Math.min(submitted, entry.late);
-      work.graded += Math.min(submitted, entry.graded);
+      work.late += late;
+      work.graded += graded;
       const departmentId = scope.sectionInfo.get(assignment.class.sectionId)?.departmentId;
       if (departmentId) {
         const department = assignmentsByDepartment.get(departmentId) ?? { expected: 0, submitted: 0 };

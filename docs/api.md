@@ -272,7 +272,7 @@ The response contains:
 - **faculty:** total; with an active sign-in account, with a disabled account, or with no account; by designation; active students per faculty member. Faculty aren't tied to a semester, so the semester filter doesn't apply to them, and the ratio always uses each department's full student count.
 - **attendance:** the overall summary, by semester and by month, using the same rules as elsewhere (late counts as present, excused sessions are left out). It also gives the number of students below the threshold out of students with counted sessions.
 - **academics:**
-  - **Assignment completion:** submissions (on time or late) against the students now actively enrolled in each class's section. Submissions beyond that count aren't counted.
+  - **Assignment completion:** submissions (on time or late) from the students now actively enrolled in each class's section, out of those students. Submissions from students who have left the section don't count.
   - **Published results:** a student passes an exam by passing every paper.
   - **Approved marks:** counted paper by paper, so they can be split by department and semester before results are published. Absent, or no mark entered, counts as not passed with a score of 0.
   - A per-exam table.

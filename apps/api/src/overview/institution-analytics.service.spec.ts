@@ -91,13 +91,14 @@ function createDatabase() {
         { id: 'as2', class: { sectionId: 'sec-ece' } },
       ]),
     },
-    // as1 has three submissions but only two students are enrolled, so it counts as two.
+    // Only submissions from students now enrolled in the section count: s9 left CSE, and s4 withdrew from ECE, so ECE's
+    // one current student (s3) has submitted nothing.
     submission: {
-      groupBy: jest.fn().mockResolvedValue([
-        { assignmentId: 'as1', status: 'SUBMITTED', _count: { _all: 1 } },
-        { assignmentId: 'as1', status: 'LATE', _count: { _all: 1 } },
-        { assignmentId: 'as1', status: 'GRADED', _count: { _all: 1 } },
-        { assignmentId: 'as2', status: 'DRAFT', _count: { _all: 1 } },
+      findMany: jest.fn().mockResolvedValue([
+        { assignmentId: 'as1', studentId: 's1', status: 'LATE' },
+        { assignmentId: 'as1', studentId: 's2', status: 'GRADED' },
+        { assignmentId: 'as1', studentId: 's9', status: 'SUBMITTED' },
+        { assignmentId: 'as2', studentId: 's4', status: 'SUBMITTED' },
       ]),
     },
     exam: { findMany: jest.fn().mockResolvedValue([{ id: 'e1', name: 'Mid Term', startsOn: day('2026-09-20'), status: 'COMPLETED' }]) },
