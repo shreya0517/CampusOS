@@ -12,7 +12,12 @@ export type CreateAnnouncementDto = {
   publishedAt?: Date;
   expiresAt?: Date;
 };
+/** An edit: the full announcement as on the form. publishedAt can only move a scheduled one; left out, it is unchanged. */
+export type UpdateAnnouncementDto = Omit<CreateAnnouncementDto, 'expiresAt'> & { expiresAt: Date | null };
 export type AnnouncementListQuery = { search?: string; category?: AnnouncementCategory; page: number; pageSize: number };
+export const ANNOUNCEMENT_STATES = ['PUBLISHED', 'SCHEDULED', 'EXPIRED', 'ARCHIVED'] as const;
+export type AnnouncementState = (typeof ANNOUNCEMENT_STATES)[number];
+export type ManageAnnouncementQuery = AnnouncementListQuery & { state?: AnnouncementState };
 
 type Body = Record<string, unknown>;
 const invalid = (): never => { throw new BadRequestException({ code: 'INVALID_INPUT', message: 'Request input is invalid.' }); };
@@ -38,13 +43,16 @@ const oneOf = <T extends string>(v: unknown, values: readonly T[]): T => {
 const AUDIENCES = Object.values(AnnouncementAudience);
 const CATEGORIES = Object.values(AnnouncementCategory);
 
-export const parseCreateAnnouncementDto = (v: unknown): CreateAnnouncementDto => {
-  const b = object(v);
+const dates = (b: Body): { publishedAt?: Date; expiresAt?: Date } => {
   const publishedAt = optionalDate(b.publishedAt);
   const expiresAt = optionalDate(b.expiresAt);
   // An announcement must still be live when it goes out: it expires after it is published, and after now.
   const now = new Date();
   if (expiresAt && expiresAt <= (publishedAt && publishedAt > now ? publishedAt : now)) invalid();
+  return { publishedAt, expiresAt };
+};
+
+const fields = (b: Body): Omit<CreateAnnouncementDto, 'publishedAt' | 'expiresAt'> => {
   return {
     title: string(b.title, 3, 160),
     body: string(b.body, 1, 5000),
@@ -55,9 +63,18 @@ export const parseCreateAnnouncementDto = (v: unknown): CreateAnnouncementDto =>
       semesterNumber: blank(b.semesterNumber) ? undefined : integer(b.semesterNumber, 1, 12),
       sectionId: optionalId(b.sectionId),
     },
-    publishedAt,
-    expiresAt,
   };
+};
+
+export const parseCreateAnnouncementDto = (v: unknown): CreateAnnouncementDto => {
+  const b = object(v);
+  return { ...fields(b), ...dates(b) };
+};
+
+export const parseUpdateAnnouncementDto = (v: unknown): UpdateAnnouncementDto => {
+  const b = object(v);
+  const { publishedAt, expiresAt } = dates(b);
+  return { ...fields(b), publishedAt, expiresAt: expiresAt ?? null };
 };
 
 export const parseAnnouncementListQuery = (v: unknown): AnnouncementListQuery => {
@@ -68,4 +85,9 @@ export const parseAnnouncementListQuery = (v: unknown): AnnouncementListQuery =>
     page: integer(q.page, 1, 10_000),
     pageSize: integer(q.pageSize, 10, 50),
   };
+};
+
+export const parseManageAnnouncementQuery = (v: unknown): ManageAnnouncementQuery => {
+  const q = object(v);
+  return { ...parseAnnouncementListQuery(q), state: blank(q.state) ? undefined : oneOf(q.state, ANNOUNCEMENT_STATES) };
 };

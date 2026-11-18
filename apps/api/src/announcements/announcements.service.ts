@@ -1,11 +1,11 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { AnnouncementAudience } from '@prisma/client';
 import type { Announcement, Prisma } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 import { DatabaseService } from '../database.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
-import type { AnnouncementListQuery, AnnouncementTarget, CreateAnnouncementDto } from './announcements.dto';
+import type { AnnouncementListQuery, AnnouncementState, AnnouncementTarget, CreateAnnouncementDto, ManageAnnouncementQuery, UpdateAnnouncementDto } from './announcements.dto';
 
 /** How often scheduled announcements are checked for delivery. */
 export const DELIVERY_INTERVAL_MS = 60_000;
@@ -37,6 +37,33 @@ export const audiencesFor = (context: AuthorizationContext): AnnouncementAudienc
   }
   return [...audiences];
 };
+
+/** Where an announcement stands: archived, waiting for its publish time, past its expiry, or live. */
+export const stateOf = (announcement: Pick<Announcement, 'archivedAt' | 'publishedAt' | 'expiresAt'>, now = new Date()): AnnouncementState => {
+  if (announcement.archivedAt) return 'ARCHIVED';
+  if (!announcement.publishedAt || announcement.publishedAt > now) return 'SCHEDULED';
+  if (announcement.expiresAt && announcement.expiresAt <= now) return 'EXPIRED';
+  return 'PUBLISHED';
+};
+
+/** The same states as filters. */
+const stateWhere = (state: AnnouncementState, now: Date): Prisma.AnnouncementWhereInput =>
+  ({
+    ARCHIVED: { archivedAt: { not: null } },
+    SCHEDULED: { archivedAt: null, OR: [{ publishedAt: null }, { publishedAt: { gt: now } }] },
+    EXPIRED: { archivedAt: null, publishedAt: { lte: now }, expiresAt: { lte: now } },
+    PUBLISHED: { archivedAt: null, publishedAt: { lte: now }, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+  })[state];
+
+const denied = (): never => {
+  throw new ForbiddenException({ code: 'FORBIDDEN', message: 'You are not authorized to access this resource.' });
+};
+const missing = (): never => {
+  throw new NotFoundException({ code: 'ANNOUNCEMENT_NOT_FOUND', message: 'Announcement not found.' });
+};
+const searchWhere = (search: string): Prisma.AnnouncementWhereInput => ({
+  OR: [{ title: { contains: search, mode: 'insensitive' } }, { body: { contains: search, mode: 'insensitive' } }],
+});
 
 type Placement = { sectionId: string; semesterNumber: number; departmentId: string };
 type SectionWithPlace = { sectionId: string; section: { semester: { number: number; course: { departmentId: string } } } };
@@ -101,12 +128,9 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
       collegeId: context.collegeId,
       audience: { in: audiencesFor(context) },
       publishedAt: { lte: now },
+      archivedAt: null,
       ...(query.category ? { category: query.category } : {}),
-      AND: [
-        { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
-        ...(visible ? [visible] : []),
-        ...(query.search ? [{ OR: [{ title: { contains: query.search, mode: 'insensitive' as const } }, { body: { contains: query.search, mode: 'insensitive' as const } }] }] : []),
-      ],
+      AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] }, ...(visible ? [visible] : []), ...(query.search ? [searchWhere(query.search)] : [])],
     };
     const [items, total] = await Promise.all([
       this.database.announcement.findMany({ where, include, orderBy: { publishedAt: 'desc' }, skip: (query.page - 1) * query.pageSize, take: query.pageSize }),
@@ -151,9 +175,10 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
     this.delivering = true;
     let delivered = 0;
     try {
-      const due = await this.database.announcement.findMany({ where: { notifiedAt: null, publishedAt: { lte: now } }, orderBy: { publishedAt: 'asc' }, take: DELIVERY_BATCH });
+      const due = await this.database.announcement.findMany({ where: { notifiedAt: null, archivedAt: null, publishedAt: { lte: now } }, orderBy: { publishedAt: 'asc' }, take: DELIVERY_BATCH });
       for (const announcement of due) {
-        const claimed = await this.database.announcement.updateMany({ where: { id: announcement.id, notifiedAt: null }, data: { notifiedAt: now } });
+        // Archived after it was found: the claim fails and it is not delivered.
+        const claimed = await this.database.announcement.updateMany({ where: { id: announcement.id, notifiedAt: null, archivedAt: null }, data: { notifiedAt: now } });
         if (claimed.count !== 1 || (announcement.expiresAt && announcement.expiresAt <= now)) continue;
         await this.announce(announcement);
         delivered += 1;
@@ -164,6 +189,106 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
       this.delivering = false;
     }
     return delivered;
+  }
+
+  /**
+   * Admin's announcement history: every announcement in the college, whatever its state, newest first, with its state
+   * and how many are in each.
+   */
+  async manage(query: ManageAnnouncementQuery, context: AuthorizationContext) {
+    if (!context.roles.includes('ADMIN')) denied();
+    const now = new Date();
+    const base: Prisma.AnnouncementWhereInput = {
+      collegeId: context.collegeId,
+      ...(query.category ? { category: query.category } : {}),
+      ...(query.search ? { AND: [searchWhere(query.search)] } : {}),
+    };
+    const where: Prisma.AnnouncementWhereInput = query.state ? { AND: [base, stateWhere(query.state, now)] } : base;
+    const states: AnnouncementState[] = ['PUBLISHED', 'SCHEDULED', 'EXPIRED', 'ARCHIVED'];
+    const [items, total, ...counts] = await Promise.all([
+      this.database.announcement.findMany({ where, include, orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }], skip: (query.page - 1) * query.pageSize, take: query.pageSize }),
+      this.database.announcement.count({ where }),
+      ...states.map((state) => this.database.announcement.count({ where: { AND: [base, stateWhere(state, now)] } })),
+    ]);
+    return {
+      items: items.map((item) => ({ ...item, state: stateOf(item, now) })),
+      total,
+      page: query.page,
+      pageSize: query.pageSize,
+      counts: Object.fromEntries(states.map((state, index) => [state, counts[index] ?? 0])) as Record<AnnouncementState, number>,
+    };
+  }
+
+  /**
+   * Admin edits an announcement. A published one keeps its publish time and is not announced again; a scheduled one
+   * can be moved, and if it is moved to now (or earlier) it goes out at once. The write only applies if the announcement
+   * hasn't been delivered since it was read, so an edit can't race the scheduled delivery.
+   */
+  async update(id: string, input: UpdateAnnouncementDto, context: AuthorizationContext) {
+    if (!context.roles.includes('ADMIN')) denied();
+    const existing = await this.database.announcement.findFirst({ where: { id, collegeId: context.collegeId } });
+    if (!existing) return missing();
+    const now = new Date();
+    const delivered = existing.notifiedAt !== null;
+    if (delivered && input.publishedAt && input.publishedAt.getTime() !== existing.publishedAt?.getTime()) {
+      throw new ConflictException({ code: 'ALREADY_PUBLISHED', message: 'This announcement has already been published, so its publish time can no longer change.' });
+    }
+    const publishedAt = input.publishedAt ?? existing.publishedAt ?? now;
+    if (input.expiresAt && input.expiresAt <= publishedAt) throw new BadRequestException({ code: 'INVALID_INPUT', message: 'The expiry must be after the publish time.' });
+    const target = await this.resolveTarget(input.target, context.collegeId);
+    const dueNow = !delivered && !existing.archivedAt && publishedAt <= now;
+
+    await this.database.$transaction(async (tx) => {
+      const written = await tx.announcement.updateMany({
+        where: { id, collegeId: context.collegeId, notifiedAt: existing.notifiedAt },
+        data: {
+          title: input.title,
+          body: input.body,
+          audience: input.audience,
+          category: input.category,
+          ...target,
+          publishedAt,
+          expiresAt: input.expiresAt,
+          ...(dueNow ? { notifiedAt: now } : {}),
+        },
+      });
+      if (written.count !== 1) throw new ConflictException({ code: 'ANNOUNCEMENT_CHANGED', message: 'This announcement was just published. Reload it and try again.' });
+      await tx.auditLog.create({ data: { collegeId: context.collegeId, actorId: context.userId, action: 'ANNOUNCEMENT_UPDATED', entityType: 'Announcement', entityId: id } });
+    });
+    const updated = await this.database.announcement.findFirstOrThrow({ where: { id, collegeId: context.collegeId }, include });
+    if (dueNow) await this.announce(updated);
+    return { ...updated, state: stateOf(updated, now) };
+  }
+
+  /** Archives an announcement: hidden from every list and, if not yet delivered, never delivered while archived. */
+  async archive(id: string, context: AuthorizationContext) {
+    return this.setArchived(id, true, context);
+  }
+
+  /** Restores an archived announcement. One whose publish time passed while archived goes out at the next check. */
+  async restore(id: string, context: AuthorizationContext) {
+    return this.setArchived(id, false, context);
+  }
+
+  private async setArchived(id: string, archive: boolean, context: AuthorizationContext) {
+    if (!context.roles.includes('ADMIN')) denied();
+    const now = new Date();
+    await this.database.$transaction(async (tx) => {
+      const written = await tx.announcement.updateMany({
+        where: { id, collegeId: context.collegeId, archivedAt: archive ? null : { not: null } },
+        data: { archivedAt: archive ? now : null },
+      });
+      if (written.count !== 1) {
+        const exists = await tx.announcement.count({ where: { id, collegeId: context.collegeId } });
+        if (!exists) missing();
+        throw new ConflictException(archive ? { code: 'ALREADY_ARCHIVED', message: 'This announcement is already archived.' } : { code: 'NOT_ARCHIVED', message: 'This announcement is not archived.' });
+      }
+      await tx.auditLog.create({
+        data: { collegeId: context.collegeId, actorId: context.userId, action: archive ? 'ANNOUNCEMENT_ARCHIVED' : 'ANNOUNCEMENT_RESTORED', entityType: 'Announcement', entityId: id },
+      });
+    });
+    const announcement = await this.database.announcement.findFirstOrThrow({ where: { id, collegeId: context.collegeId }, include });
+    return { ...announcement, state: stateOf(announcement, now) };
   }
 
   /** Checks a target belongs to the college. A section fixes the department and semester, and must agree with any given. */

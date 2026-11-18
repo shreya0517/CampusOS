@@ -1,8 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { AnnouncementAudience } from '@prisma/client';
-import { AnnouncementsService, audiencesFor } from './announcements.service';
-import { parseAnnouncementListQuery, parseCreateAnnouncementDto } from './announcements.dto';
-import type { CreateAnnouncementDto } from './announcements.dto';
+import { AnnouncementsService, audiencesFor, stateOf } from './announcements.service';
+import { parseAnnouncementListQuery, parseCreateAnnouncementDto, parseManageAnnouncementQuery, parseUpdateAnnouncementDto } from './announcements.dto';
+import type { CreateAnnouncementDto, UpdateAnnouncementDto } from './announcements.dto';
 import type { AuthorizationContext } from '../authorization/authorization.types';
 
 const context = (roles: AuthorizationContext['roles'], departmentId: string | null = null): AuthorizationContext => ({ userId: 'user-1', collegeId: 'col-a', roles, permissions: [], departmentId });
@@ -40,6 +40,8 @@ function setup() {
       count: jest.fn().mockResolvedValue(0),
       create: jest.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) => Promise.resolve(stored({ ...data, id: 'ann-1' }))),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      findFirst: jest.fn().mockResolvedValue(stored({ notifiedAt: new Date('2026-11-18T09:00:00Z'), publishedAt: new Date('2026-11-18T09:00:00Z') })),
+      findFirstOrThrow: jest.fn().mockImplementation(() => Promise.resolve(stored({ notifiedAt: new Date() }))),
     },
     enrollment: { findMany: jest.fn().mockResolvedValue([place('sec-a', 3, 'dept-cse')]) },
     class: { findMany: jest.fn().mockResolvedValue([place('sec-b', 5, 'dept-cse')]) },
@@ -47,7 +49,10 @@ function setup() {
     department: { findFirst: jest.fn().mockResolvedValue({ id: 'dept-cse' }) },
     student: { findMany: jest.fn().mockResolvedValue([{ userId: 'student-1' }, { userId: 'student-2' }]) },
     faculty: { findMany: jest.fn().mockResolvedValue([{ userId: 'faculty-1' }]) },
+    auditLog: { create: jest.fn() },
+    $transaction: jest.fn(),
   };
+  database.$transaction.mockImplementation((work: (tx: typeof database) => Promise<unknown>) => work(database));
   const notifications = {
     safely: jest.fn().mockImplementation((work: (n: unknown) => Promise<void>) => work(notifications)),
     usersWithRoles: jest.fn().mockImplementation((_college: string, roles: string[]) => Promise.resolve(roles.includes('STUDENT') ? ['user-1', 'admin-2', 'student-1'] : roles.includes('HOD') && roles.length === 1 ? ['hod-1', 'hod-2'] : ['admin-2'])),
@@ -175,8 +180,8 @@ describe('AnnouncementsService.deliverDue', () => {
     database.announcement.findMany.mockResolvedValueOnce([stored({ id: 'due-1' }), stored({ id: 'taken' }), stored({ id: 'expired', expiresAt: new Date('2026-11-20T08:00:00Z') })]);
     database.announcement.updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 }).mockResolvedValueOnce({ count: 1 });
     await expect(service.deliverDue(now)).resolves.toBe(1);
-    expect(database.announcement.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { notifiedAt: null, publishedAt: { lte: now } } }));
-    expect(database.announcement.updateMany).toHaveBeenCalledWith({ where: { id: 'due-1', notifiedAt: null }, data: { notifiedAt: now } });
+    expect(database.announcement.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { notifiedAt: null, archivedAt: null, publishedAt: { lte: now } } }));
+    expect(database.announcement.updateMany).toHaveBeenCalledWith({ where: { id: 'due-1', notifiedAt: null, archivedAt: null }, data: { notifiedAt: now } });
     expect(notifications.notify).toHaveBeenCalledTimes(1);
   });
 
@@ -186,6 +191,91 @@ describe('AnnouncementsService.deliverDue', () => {
     const log = jest.spyOn((service as unknown as { logger: { error: () => void } }).logger, 'error').mockImplementation(() => undefined);
     await expect(service.deliverDue()).resolves.toBe(0);
     expect(log).toHaveBeenCalled();
+  });
+});
+
+describe('Admin announcement history, edits and archive', () => {
+  const edit = (overrides: Partial<UpdateAnnouncementDto> = {}): UpdateAnnouncementDto => ({ ...input(), expiresAt: null, ...overrides });
+
+  it('works out each state', () => {
+    const now = new Date('2026-11-18T10:00:00Z');
+    expect(stateOf({ archivedAt: now, publishedAt: now, expiresAt: null }, now)).toBe('ARCHIVED');
+    expect(stateOf({ archivedAt: null, publishedAt: new Date('2026-11-19T00:00:00Z'), expiresAt: null }, now)).toBe('SCHEDULED');
+    expect(stateOf({ archivedAt: null, publishedAt: new Date('2026-11-01T00:00:00Z'), expiresAt: new Date('2026-11-10T00:00:00Z') }, now)).toBe('EXPIRED');
+    expect(stateOf({ archivedAt: null, publishedAt: new Date('2026-11-01T00:00:00Z'), expiresAt: null }, now)).toBe('PUBLISHED');
+  });
+
+  it('lists every announcement in the college for Admin, by state, with counts', async () => {
+    const { database, service } = setup();
+    database.announcement.findMany.mockResolvedValueOnce([stored({ publishedAt: new Date(Date.now() + 60_000) })]);
+    database.announcement.count.mockResolvedValueOnce(1).mockResolvedValueOnce(4).mockResolvedValueOnce(1).mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+    const result = await service.manage({ page: 1, pageSize: 10, state: 'SCHEDULED' }, context(['ADMIN']));
+    expect(database.announcement.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { AND: [{ collegeId: 'col-a' }, { archivedAt: null, OR: [{ publishedAt: null }, { publishedAt: { gt: expect.any(Date) } }] }] } }),
+    );
+    expect(result).toMatchObject({ total: 1, counts: { PUBLISHED: 4, SCHEDULED: 1, EXPIRED: 2, ARCHIVED: 0 }, items: [{ id: 'ann-1', state: 'SCHEDULED' }] });
+    await expect(service.manage({ page: 1, pageSize: 10 }, context(['HOD'], 'dept-cse'))).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('edits a published announcement without announcing it again', async () => {
+    const { database, notifications, service } = setup();
+    const result = await service.update('ann-1', edit({ title: 'Holiday moved', target: { departmentId: 'dept-cse' } }), context(['ADMIN']));
+    expect(database.announcement.updateMany).toHaveBeenCalledWith({
+      where: { id: 'ann-1', collegeId: 'col-a', notifiedAt: new Date('2026-11-18T09:00:00Z') },
+      data: expect.objectContaining({ title: 'Holiday moved', departmentId: 'dept-cse', publishedAt: new Date('2026-11-18T09:00:00Z'), expiresAt: null }),
+    });
+    expect(database.announcement.updateMany.mock.calls[0]?.[0]).not.toHaveProperty('data.notifiedAt');
+    expect(database.auditLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({ action: 'ANNOUNCEMENT_UPDATED', entityId: 'ann-1', actorId: 'user-1' }) });
+    expect(notifications.notify).not.toHaveBeenCalled();
+    expect(result.state).toBe('PUBLISHED');
+  });
+
+  it("won't move a published announcement's publish time", async () => {
+    const { service } = setup();
+    await expect(service.update('ann-1', edit({ publishedAt: new Date(Date.now() + 86_400_000) }), context(['ADMIN']))).rejects.toMatchObject({ response: { code: 'ALREADY_PUBLISHED' } });
+  });
+
+  it('publishes a scheduled announcement at once when it is moved to now', async () => {
+    const { database, notifications, service } = setup();
+    database.announcement.findFirst.mockResolvedValueOnce(stored({ publishedAt: new Date(Date.now() + 86_400_000), notifiedAt: null }));
+    await service.update('ann-1', edit({ publishedAt: new Date(Date.now() - 1000) }), context(['ADMIN']));
+    expect(database.announcement.updateMany).toHaveBeenCalledWith({ where: expect.objectContaining({ notifiedAt: null }), data: expect.objectContaining({ notifiedAt: expect.any(Date) }) });
+    expect(notifications.notify).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses an edit that races the scheduled delivery, and a missing announcement', async () => {
+    const { database, service } = setup();
+    database.announcement.findFirst.mockResolvedValueOnce(stored({ publishedAt: new Date(Date.now() + 60_000), notifiedAt: null }));
+    database.announcement.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(service.update('ann-1', edit(), context(['ADMIN']))).rejects.toMatchObject({ response: { code: 'ANNOUNCEMENT_CHANGED' } });
+    expect(database.auditLog.create).not.toHaveBeenCalled();
+    database.announcement.findFirst.mockResolvedValueOnce(null);
+    await expect(service.update('other-college', edit(), context(['ADMIN']))).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('archives and restores once each, with an audit entry', async () => {
+    const { database, service } = setup();
+    await service.archive('ann-1', context(['ADMIN']));
+    expect(database.announcement.updateMany).toHaveBeenCalledWith({ where: { id: 'ann-1', collegeId: 'col-a', archivedAt: null }, data: { archivedAt: expect.any(Date) } });
+    expect(database.auditLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({ action: 'ANNOUNCEMENT_ARCHIVED', entityId: 'ann-1' }) });
+
+    database.announcement.updateMany.mockResolvedValueOnce({ count: 0 });
+    database.announcement.count.mockResolvedValueOnce(1);
+    await expect(service.archive('ann-1', context(['ADMIN']))).rejects.toBeInstanceOf(ConflictException);
+
+    await service.restore('ann-1', context(['ADMIN']));
+    expect(database.announcement.updateMany).toHaveBeenLastCalledWith({ where: { id: 'ann-1', collegeId: 'col-a', archivedAt: { not: null } }, data: { archivedAt: null } });
+
+    database.announcement.updateMany.mockResolvedValueOnce({ count: 0 });
+    database.announcement.count.mockResolvedValueOnce(0);
+    await expect(service.restore('missing', context(['ADMIN']))).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.archive('ann-1', context(['FACULTY'], 'dept-cse'))).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('hides archived announcements from the list', async () => {
+    const { database, service } = setup();
+    await service.list({ page: 1, pageSize: 10 }, context(['ADMIN']));
+    expect(listArgs(database).where).toMatchObject({ archivedAt: null });
   });
 });
 
@@ -208,6 +298,12 @@ describe('announcement input', () => {
       category: 'EXAMINATION',
       target: { departmentId: 'dept-cse', semesterNumber: 3 },
     });
+  });
+
+  it('reads an edit and the history filters', () => {
+    expect(parseUpdateAnnouncementDto({ title: 'Holiday', body: 'Closed', expiresAt: '' })).toMatchObject({ expiresAt: null, publishedAt: undefined, target: {} });
+    expect(parseManageAnnouncementQuery({ state: 'ARCHIVED' })).toMatchObject({ state: 'ARCHIVED', page: 1 });
+    expect(() => parseManageAnnouncementQuery({ state: 'DELETED' })).toThrow();
   });
 
   it('validates list queries', () => {
