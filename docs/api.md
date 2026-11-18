@@ -34,7 +34,7 @@ Success responses should be predictable and typed. Error responses should includ
 
 All authentication endpoints are under `/api/v1/auth`. Registration and login require `collegeCode` because users are college-scoped.
 
-- `POST /api/v1/auth/register`: accepts `{ "collegeCode", "email", "displayName", "password" }`; the password must have at least 12 characters. Returns `201 { "user": { ... } }`, creates an unverified account and an email-verification token record, and never returns that token.
+- `POST /api/v1/auth/register`: off by default and returns `403 REGISTRATION_DISABLED`, because Admins create student and faculty accounts and a self-registered account has no role. Set `ALLOW_SELF_REGISTRATION=true` to turn it on. When on, it accepts `{ "collegeCode", "email", "displayName", "password" }`; the password must have at least 12 characters. Returns `201 { "user": { ... } }`, creates an unverified account and an email-verification token record, and never returns that token.
 - `POST /api/v1/auth/login`: accepts `{ "collegeCode", "email", "password" }`. Returns `200 { "accessToken", "user" }` and writes a rotating `campusos_refresh` cookie with `HttpOnly`, `SameSite=Lax`, scoped to `/api/v1/auth`, and `Secure` in production.
 - `POST /api/v1/auth/refresh`: uses the refresh cookie, rotates it, and returns `200 { "accessToken", "user" }`. Expired or revoked sessions return `401 SESSION_EXPIRED`.
 - `POST /api/v1/auth/logout`: uses the refresh cookie, revokes its session, clears the cookie, and returns `204`. Access tokens for that session fail immediately.
@@ -78,7 +78,7 @@ Set `AUTH_ACCESS_TOKEN_SECRET` to a random value of at least 32 characters befor
 
 ## Authorization
 
-Authorization runs after access-token authentication. The API derives role, permission, college, and department context from server-side records; request-supplied tenant, role, and department values never grant access. Reusable guards return `403 FORBIDDEN` for insufficient role, permission, tenant, or department scope. Phase 03 exposes only isolated authorization probes under `/api/v1/authorization/probes` to validate this infrastructure; they are not business APIs.
+Authorization runs after access-token authentication. The API derives role, permission, college, and department context from server-side records; request-supplied tenant, role, and department values never grant access. Reusable guards return `403 FORBIDDEN` for insufficient role, permission, tenant, or department scope. Every route behind the authorization guard needs at least one role, including routes that name no roles: an account with no role in its college gets `403 NO_ROLE` everywhere except the `/auth` routes. Phase 03 exposes only isolated authorization probes under `/api/v1/authorization/probes` to validate this infrastructure; they are not business APIs.
 
 ## Testing Expectations
 
@@ -153,6 +153,7 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
   - POST /api/v1/exams/:id/subjects/:examSubjectId/marks/submit: whoever can enter marks for the paper. The sheet must be complete (every active student has marks or is absent), otherwise 400 MARKS_INCOMPLETE. DRAFT becomes SUBMITTED.
   - POST /api/v1/exams/:id/subjects/:examSubjectId/marks/review: HOD of the paper's department, or ADMIN. Body { decision: APPROVED | RETURNED, comment? }. SUBMITTED becomes APPROVED, or DRAFT when returned; 409 MARKS_NOT_SUBMITTED otherwise.
   - Submissions and reviews are written to the audit log; GET .../marks returns them as `history`.
+- GET /api/v1/exams and GET /api/v1/exams/:id: ADMIN, HOD and FACULTY see every exam. Everyone else (students) sees only SCHEDULED and COMPLETED exams; a draft or cancelled exam returns 404 EXAM_NOT_FOUND by id, as if it didn't exist.
 - POST /api/v1/exams/:id/calculate-results: ADMIN only, and only once every paper of the exam is APPROVED (otherwise 409 MARKS_NOT_APPROVED).
 - GET /api/v1/exams/review-queue: papers with SUBMITTED marks, oldest first. ADMIN gets every paper in the college; HOD only papers whose semester (and section, if any) is in their department. FACULTY get 403.
 - POST /api/v1/exams/:id/subjects: the subject and the optional section must belong to the given semester; otherwise 400 INVALID_EXAM_SUBJECT. For HOD marks access, both the semester and the section of a paper must be in the HOD's department.

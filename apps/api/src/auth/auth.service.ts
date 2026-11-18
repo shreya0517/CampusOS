@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { createHmac, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { DatabaseService } from '../database.service';
@@ -15,7 +15,14 @@ type SessionResult = { accessToken: string; refreshToken: string; user: PublicUs
 export class AuthService {
   constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
 
+  /**
+   * Public sign-up, off by default: Admins create student and faculty accounts, and a self-registered account would
+   * have no role anyway. Set ALLOW_SELF_REGISTRATION=true to turn it on.
+   */
   async register(input: RegisterDto): Promise<PublicUser> {
+    if (!getAuthConfig().allowSelfRegistration) {
+      throw new ForbiddenException({ code: 'REGISTRATION_DISABLED', message: 'Accounts are created by your college administrator.' });
+    }
     this.validateRegistration(input);
     const college = await this.database.college.findUnique({ where: { code: input.collegeCode } });
     if (!college) throw new BadRequestException({ code: 'INVALID_COLLEGE', message: 'Invalid registration details.' });
