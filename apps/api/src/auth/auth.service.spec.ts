@@ -14,7 +14,8 @@ const createDatabase = () => ({
 });
 
 describe('AuthService', () => {
-  beforeAll(() => { process.env.AUTH_ACCESS_TOKEN_SECRET = 'test-secret-with-at-least-thirty-two-characters'; });
+  beforeAll(() => { process.env.AUTH_ACCESS_TOKEN_SECRET = 'test-secret-with-at-least-thirty-two-characters'; process.env.ALLOW_SELF_REGISTRATION = 'true'; });
+  afterAll(() => { delete process.env.ALLOW_SELF_REGISTRATION; });
 
   it('hashes passwords with scrypt and verifies the correct password only', async () => {
     const hash = await hashPassword('a-strong-password');
@@ -34,6 +35,19 @@ describe('AuthService', () => {
     await expect(service.register({ collegeCode: 'DEMO', email: 'USER@example.test', displayName: 'Test User', password: 'a-strong-password' })).resolves.toMatchObject({ email: 'user@example.test', emailVerified: false });
     log.mockRestore();
     expect(database.user.create.mock.calls[0][0].data.passwordHash).not.toBe('a-strong-password');
+  });
+
+  it('refuses public sign-up unless ALLOW_SELF_REGISTRATION is true', async () => {
+    const database = createDatabase();
+    const service = new AuthService(database as never);
+    for (const value of [undefined, 'false', '1']) {
+      if (value === undefined) delete process.env.ALLOW_SELF_REGISTRATION;
+      else process.env.ALLOW_SELF_REGISTRATION = value;
+      await expect(service.register({ collegeCode: 'DEMO', email: 'user@example.test', displayName: 'Test User', password: 'a-strong-password' })).rejects.toMatchObject({ response: { code: 'REGISTRATION_DISABLED' } });
+    }
+    process.env.ALLOW_SELF_REGISTRATION = 'true';
+    expect(database.college.findUnique).not.toHaveBeenCalled();
+    expect(database.user.create).not.toHaveBeenCalled();
   });
 
   it('rejects invalid registration input before persistence', async () => {

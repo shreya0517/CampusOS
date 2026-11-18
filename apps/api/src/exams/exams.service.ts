@@ -15,6 +15,14 @@ import type {
 /** Students in exam and fee responses carry only identity fields, never contact details. */
 const STUDENT_SUMMARY = { select: { id: true, studentCode: true, firstName: true, lastName: true } };
 
+/**
+ * Staff, including a platform SUPER_ADMIN, see every exam; everyone else (students) only exams that are scheduled or
+ * done, never drafts or cancelled ones.
+ */
+const STAFF_ROLES: AuthorizationContext['roles'] = ['SUPER_ADMIN', 'ADMIN', 'HOD', 'FACULTY'];
+const isStaff = (context: AuthorizationContext): boolean => STAFF_ROLES.some((role) => context.roles.includes(role));
+const VISIBLE_TO_STUDENTS: ExamStatus[] = [ExamStatus.SCHEDULED, ExamStatus.COMPLETED];
+
 const denied = (): never => {
   throw new ForbiddenException({ code: 'FORBIDDEN', message: 'You are not authorized to access this resource.' });
 };
@@ -82,9 +90,8 @@ export class ExamsService {
       where.name = { contains: query.search, mode: 'insensitive' };
     }
 
-    // If caller is student, show non-draft exams
-    if (context.roles.includes('STUDENT') && !context.roles.includes('ADMIN') && !context.roles.includes('HOD') && !context.roles.includes('FACULTY')) {
-      where.status = { in: [ExamStatus.SCHEDULED, ExamStatus.COMPLETED] };
+    if (!isStaff(context)) {
+      where.status = { in: VISIBLE_TO_STUDENTS };
     }
 
     const [items, total] = await Promise.all([
@@ -117,9 +124,10 @@ export class ExamsService {
       },
     });
 
-    if (!exam) throw examMissing();
+    // A draft or cancelled exam reads as missing to students, as in the list, so its existence isn't revealed.
+    if (!exam || (!isStaff(context) && !VISIBLE_TO_STUDENTS.includes(exam.status))) throw examMissing();
 
-    if (context.roles.includes('STUDENT') && !context.roles.includes('ADMIN') && !context.roles.includes('HOD') && !context.roles.includes('FACULTY')) {
+    if (context.roles.includes('STUDENT') && !isStaff(context)) {
       const studentId = await this.getStudentId(context);
       const [result, marks] = await Promise.all([
         this.database.result.findFirst({

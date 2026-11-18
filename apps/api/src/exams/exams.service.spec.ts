@@ -112,6 +112,28 @@ describe('ExamsService', () => {
     );
   });
 
+  it('shows students only scheduled and completed exams, in the list and by id', async () => {
+    database.exam.findMany.mockResolvedValue([]);
+    database.exam.count.mockResolvedValue(0);
+    await service.listExams({ page: 1, pageSize: 20, status: ExamStatus.DRAFT }, student);
+    expect(database.exam.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ status: { in: [ExamStatus.SCHEDULED, ExamStatus.COMPLETED] } }) }));
+
+    for (const status of [ExamStatus.DRAFT, ExamStatus.CANCELLED]) {
+      database.exam.findFirst.mockResolvedValueOnce({ ...mockExam, status });
+      await expect(service.getExam('exam-1', student)).rejects.toMatchObject({ response: { code: 'EXAM_NOT_FOUND' } });
+    }
+    expect(database.mark.findMany).not.toHaveBeenCalled();
+
+    // Staff, and a platform SUPER_ADMIN, still open a draft and list every exam.
+    database.exam.findFirst.mockResolvedValueOnce(mockExam);
+    await expect(service.getExam('exam-1', faculty)).resolves.toMatchObject({ id: 'exam-1', status: ExamStatus.DRAFT });
+    const superAdmin: AuthorizationContext = { ...admin, roles: ['SUPER_ADMIN'] };
+    database.exam.findFirst.mockResolvedValueOnce(mockExam);
+    await expect(service.getExam('exam-1', superAdmin)).resolves.toMatchObject({ status: ExamStatus.DRAFT });
+    await service.listExams({ page: 1, pageSize: 20 }, superAdmin);
+    expect(database.exam.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: { collegeId: 'col-a' } }));
+  });
+
   it('validates marks obtained does not exceed maxMarks on updateSubjectMarks', async () => {
     database.class.findFirst.mockResolvedValue({ id: 'class-1' });
     database.examSubject.findFirst.mockResolvedValue({

@@ -7,6 +7,8 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 
 process.env.AUTH_ACCESS_TOKEN_SECRET = 'integration-test-secret-with-at-least-thirty-two-characters';
+// These tests cover the sign-up flow itself, which is off unless this is set.
+process.env.ALLOW_SELF_REGISTRATION = 'true';
 
 type User = { id: string; collegeId: string; email: string; displayName: string; passwordHash: string; emailVerifiedAt: Date | null; status: 'ACTIVE' };
 type Session = { id: string; collegeId: string; userId: string; refreshTokenHash: string; expiresAt: Date; revokedAt: Date | null };
