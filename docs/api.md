@@ -197,3 +197,13 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 - GET /api/v1/departments/:id: the same, plus `courses` (code, name, duration, number of semesters) and `subjects` (code, name, credits, course and semester).
 - PUT /api/v1/departments/:id/hod: ADMIN only, body `{ "facultyId": string | null }`. Assigns, changes or (with null) removes the department's HOD. The HOD is a faculty member of this department with an active sign-in account; otherwise 409 NOT_IN_DEPARTMENT, NO_ACCOUNT or ACCOUNT_INACTIVE. Anyone else holding the HOD role in the department loses it, so each department has one head. Roles are read on every request, so the change applies at once; the web app shows the HOD portal from the person's next sign-in. Audited as DEPARTMENT_HOD_CHANGED.
 - PUT /api/v1/faculty/:id: moving an HOD to another department also removes their HOD role (they no longer head the old department), audited the same way.
+
+## Attendance Monitoring
+
+- GET /api/v1/attendance/report?from=&to=&departmentId=: ADMIN (every department, or one via departmentId) and HOD (their own; another department returns 403). FACULTY and STUDENT get 403.
+  - Dates are YYYY-MM-DD. Without them the report covers the last 30 days, ending today in the college's timezone. A range over 366 days returns 400 RANGE_TOO_LONG.
+  - Returns `range`, `threshold` (75), `sessions` recorded in the range, and the `overall` summary.
+  - It also returns `byDepartment`, `byClass` (subject, section, faculty, sessions) and `byMonth` (YYYY-MM).
+  - `shortages` lists students under the threshold, lowest first, up to 500, with their active section.
+  - Summaries follow the student attendance rules: late counts as attended and excused sessions are left out.
+- Admin decision 2: POST /api/v1/attendance and PUT /api/v1/attendance/:id are HOD and FACULTY only. Admin reads sessions, history and the report but doesn't mark or correct. Faculty correct within 48 hours; the HOD corrects after that.
