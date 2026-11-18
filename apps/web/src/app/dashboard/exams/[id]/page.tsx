@@ -38,6 +38,7 @@ export default function ExamDetailPage() {
   const router = useRouter();
   const { primaryRole } = useAuth();
   const isStaff = primaryRole === 'Admin' || primaryRole === 'HOD' || primaryRole === 'Faculty';
+  // Admins and HODs (for their department) schedule and remove papers; faculty enter marks. Only an Admin deletes an exam.
   const isAdminOrHOD = primaryRole === 'Admin' || primaryRole === 'HOD';
 
   const [exam, setExam] = useState<Exam | null>(null);
@@ -192,7 +193,7 @@ export default function ExamDetailPage() {
                 </Button>
               )}
 
-              {isAdminOrHOD && (
+              {primaryRole === 'Admin' && (
                 <Button variant="destructive" onClick={() => void handleDeleteExam()}>
                   Delete Exam
                 </Button>
@@ -239,7 +240,7 @@ export default function ExamDetailPage() {
             <CardTitle>Scheduled Subject Papers</CardTitle>
             <CardDescription>Subject exam timetable, maximum marks, pass criteria, and student mark entry.</CardDescription>
           </div>
-          {isStaff && (
+          {isAdminOrHOD && (
             <Button variant="outline" onClick={() => setShowAddSubject(!showAddSubject)}>
               {showAddSubject ? 'Cancel' : '+ Schedule Subject'}
             </Button>
@@ -307,7 +308,7 @@ export default function ExamDetailPage() {
                             </Button>
                           </Link>
                         )}
-                        {isStaff && (
+                        {isAdminOrHOD && sub.marksStatus === 'DRAFT' && (
                           <Button variant="ghost" className="text-xs text-red-600" onClick={() => void handleRemoveSubject(sub.id)}>
                             Remove
                           </Button>

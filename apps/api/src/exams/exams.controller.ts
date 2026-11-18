@@ -19,7 +19,7 @@ export class ExamsController {
   constructor(@Inject(ExamsService) private readonly service: ExamsService) {}
 
   @Post()
-  @RequireRoles('ADMIN', 'HOD', 'FACULTY')
+  @RequireRoles('ADMIN')
   async createExam(@Body() body: unknown, @CurrentAuthorization() context: AuthorizationContext) {
     const input = parseCreateExamDto(body);
     return this.service.createExam(input, context);
@@ -49,20 +49,20 @@ export class ExamsController {
   }
 
   @Put(':id')
-  @RequireRoles('ADMIN', 'HOD', 'FACULTY')
+  @RequireRoles('ADMIN')
   async updateExam(@Param('id') id: string, @Body() body: unknown, @CurrentAuthorization() context: AuthorizationContext) {
     const input = parseUpdateExamDto(body);
     return this.service.updateExam(id, input, context);
   }
 
   @Delete(':id')
-  @RequireRoles('ADMIN', 'HOD')
+  @RequireRoles('ADMIN')
   async deleteExam(@Param('id') id: string, @CurrentAuthorization() context: AuthorizationContext) {
     return this.service.deleteExam(id, context);
   }
 
   @Post(':id/subjects')
-  @RequireRoles('ADMIN', 'HOD', 'FACULTY')
+  @RequireRoles('ADMIN', 'HOD')
   async addExamSubject(
     @Param('id') id: string,
     @Body() body: unknown,
@@ -73,7 +73,7 @@ export class ExamsController {
   }
 
   @Delete(':id/subjects/:examSubjectId')
-  @RequireRoles('ADMIN', 'HOD', 'FACULTY')
+  @RequireRoles('ADMIN', 'HOD')
   async removeExamSubject(
     @Param('id') id: string,
     @Param('examSubjectId') examSubjectId: string,

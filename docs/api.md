@@ -153,6 +153,13 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
   - POST /api/v1/exams/:id/subjects/:examSubjectId/marks/submit: whoever can enter marks for the paper. The sheet must be complete (every active student has marks or is absent), otherwise 400 MARKS_INCOMPLETE. DRAFT becomes SUBMITTED.
   - POST /api/v1/exams/:id/subjects/:examSubjectId/marks/review: HOD of the paper's department, or ADMIN. Body { decision: APPROVED | RETURNED, comment? }. SUBMITTED becomes APPROVED, or DRAFT when returned; 409 MARKS_NOT_SUBMITTED otherwise.
   - Submissions and reviews are written to the audit log; GET .../marks returns them as `history`.
+- POST, PUT and DELETE /api/v1/exams(/:id): ADMIN only. An exam spans the whole college; HODs add their department's papers to it.
+  - A rename onto another exam's name returns 409 EXAM_ALREADY_EXISTS.
+  - DELETE is refused with 409 EXAM_HAS_MARKS once any paper's marks are under review or approved, or results exist; cancel the exam instead. Each delete writes an EXAM_DELETED audit entry.
+- POST /api/v1/exams/:id/subjects and DELETE /api/v1/exams/:id/subjects/:examSubjectId: ADMIN, or an HOD for a paper whose semester (and section) is in their department; FACULTY get 403.
+  - Once the exam has results, its papers are fixed (409 RESULTS_PUBLISHED).
+  - A paper can be removed only while its marks are a draft (409 MARKS_IN_REVIEW). Each removal writes an EXAM_PAPER_REMOVED audit entry with the number of marks deleted.
+- GET /api/v1/exams/:id/results: ADMIN sees every student's result; an HOD sees their department's students; FACULTY see students actively enrolled in a section where they teach.
 - GET /api/v1/exams and GET /api/v1/exams/:id: ADMIN, HOD and FACULTY see every exam. Everyone else (students) sees only SCHEDULED and COMPLETED exams; a draft or cancelled exam returns 404 EXAM_NOT_FOUND by id, as if it didn't exist.
 - GET /api/v1/exams/me/results (STUDENT) and the student's view of GET /api/v1/exams/:id: a student sees their result, and their paper marks for an exam, only once that result is published. Marks that are still being entered, submitted or reviewed stay with staff.
 - POST /api/v1/exams/:id/calculate-results: ADMIN only, and only once every paper of the exam is APPROVED (otherwise 409 MARKS_NOT_APPROVED).
