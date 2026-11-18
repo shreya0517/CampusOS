@@ -179,6 +179,18 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 - POST /api/v1/fees/invoices/:id/create-razorpay-order and POST /api/v1/fees/payments/verify-razorpay: STUDENT only, for their own invoices (404 otherwise). Orders include `testMode`.
 - GET /api/v1/fees/payment-mode: ADMIN and STUDENT. Returns { testMode, onlinePaymentsAvailable }. The web app has no Razorpay Checkout step yet, so it only offers payment when this says it can complete; this avoids creating pending payments that can never finish.
 - Signature checks: a real Razorpay signature is verified against `RAZORPAY_KEY_SECRET`. The simulated `test_sig_<paymentId>` signature is accepted only in test mode, meaning outside production with no secret configured. In production, both endpoints return 503 PAYMENTS_NOT_CONFIGURED until `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` are set.
+- Orders:
+  - Only an ISSUED, PARTIALLY_PAID or OVERDUE invoice can be paid. A DRAFT or VOID invoice returns 409 INVOICE_NOT_PAYABLE, and one already covered by its payments returns 400 INVOICE_ALREADY_PAID.
+  - The order is for the balance still owed (the amount due minus completed payments), not the whole amount again.
+  - An invoice has at most one open order. Asking again, for example from a second tab, returns the same order, so the balance can't be charged twice. An open order for a different amount is out of date: it is marked FAILED and replaced. Orders for one invoice are made one at a time, with the invoice row locked.
+  - `method` is optional and must be ONLINE (the default), UPI or CARD. Cash and bank transfers aren't made through an online order.
+- Verification:
+  - Only a PENDING payment is settled. Verifying a COMPLETED or FAILED one returns 409 PAYMENT_NOT_PENDING and changes nothing.
+  - `razorpayOrderId` must be the order the payment was created for (400 ORDER_MISMATCH otherwise), and the signature is checked against that order.
+  - A bad signature marks the payment FAILED only while it is still pending.
+  - Settling claims the payment with a conditional update, so two verifications can't both complete it. It locks the invoice, then sets it to PAID once its completed payments cover the amount due, or PARTIALLY_PAID before that.
+- Invoice and receipt numbers end in ten random hex characters (for example REC-2026-3FA9C1B2D4), so a clash with the unique number can't fail an invoice or a payment.
+- Bad fee input returns 400 INVALID_INPUT with the reason, instead of a 500.
 
 ## Faculty Performance
 

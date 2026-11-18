@@ -48,7 +48,8 @@ function setup() {
       findUniqueOrThrow: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve(rows.get(where.id) ?? stored({ id: where.id }))),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       findFirst: jest.fn().mockResolvedValue(stored({ notifiedAt: new Date('2026-11-18T09:00:00Z'), publishedAt: new Date('2026-11-18T09:00:00Z') })),
-      findFirstOrThrow: jest.fn().mockImplementation(() => Promise.resolve(stored({ notifiedAt: new Date() }))),
+      // A fixed past time: a fresh new Date() here could land a millisecond after the service's own clock and read as scheduled.
+      findFirstOrThrow: jest.fn().mockImplementation(() => Promise.resolve(stored({ notifiedAt: new Date('2026-11-18T09:00:00Z'), publishedAt: new Date('2026-11-18T09:00:00Z') }))),
     },
     enrollment: { findMany: jest.fn().mockResolvedValue([place('sec-a', 3, 'dept-cse')]) },
     class: { findMany: jest.fn().mockResolvedValue([place('sec-b', 5, 'dept-cse')]) },

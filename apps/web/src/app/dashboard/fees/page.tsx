@@ -22,6 +22,9 @@ import type {
   Receipt,
 } from '@/lib/fees-api';
 
+/** Invoices that can be paid online: issued and not fully paid. Draft invoices aren't issued yet; void ones are cancelled. */
+const PAYABLE: InvoiceStatus[] = ['ISSUED', 'PARTIALLY_PAID', 'OVERDUE'];
+
 const STATUS_COLORS: Record<InvoiceStatus, string> = {
   DRAFT: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200 border-gray-300',
   ISSUED: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200 border-amber-300',
@@ -113,7 +116,7 @@ export default function FeesPage() {
       });
 
       setPaymentSuccess(
-        `Test payment of ₹${Number(inv.amountDue).toLocaleString('en-IN')} recorded (test mode, no money was charged). Receipt Number: ${
+        `Test payment of ₹${Number(order.amount).toLocaleString('en-IN')} recorded (test mode, no money was charged). Receipt Number: ${
           res.receipt?.receiptNumber || 'Generated'
         }`,
       );
@@ -301,11 +304,11 @@ export default function FeesPage() {
                         )}
                       </div>
 
-                      {inv.status !== 'PAID' && onlinePayments && !onlinePayments.onlinePaymentsAvailable ? (
+                      {PAYABLE.includes(inv.status) && onlinePayments && !onlinePayments.onlinePaymentsAvailable ? (
                         <p className="rounded bg-[hsl(var(--muted))] p-2 text-center text-xs text-[hsl(var(--muted-foreground))]">
                           Online payment isn&apos;t available yet. Please pay at the accounts office.
                         </p>
-                      ) : inv.status !== 'PAID' ? (
+                      ) : PAYABLE.includes(inv.status) ? (
                         <Button
                           disabled={!onlinePayments || (processingPayment && payingInvoice?.id === inv.id)}
                           onClick={() => void handleInitiatePayment(inv)}
@@ -317,10 +320,14 @@ export default function FeesPage() {
                               ? 'Pay Now (test mode)'
                               : 'Pay Now via Razorpay'}
                         </Button>
-                      ) : (
+                      ) : inv.status === 'PAID' ? (
                         <div className="rounded bg-green-50 p-2 text-center text-xs font-semibold text-green-800 dark:bg-green-950/40 dark:text-green-300">
                           Payment Complete
                         </div>
+                      ) : (
+                        <p className="rounded bg-[hsl(var(--muted))] p-2 text-center text-xs text-[hsl(var(--muted-foreground))]">
+                          {inv.status === 'VOID' ? 'Cancelled: nothing to pay.' : 'Not issued yet.'}
+                        </p>
                       )}
                     </CardContent>
                   </Card>

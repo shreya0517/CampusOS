@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { BadRequestException, ForbiddenException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { InvoiceStatus, PaymentStatus } from '@prisma/client';
 import { FeesService } from './fees.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
@@ -7,6 +7,8 @@ import type { DatabaseService } from '../database.service';
 import {
   parseCreateFeeStructureDto,
   parseCreateInvoiceDto,
+  parseCreateRazorpayOrderDto,
+  parseFeesListQuery,
   parseVerifyRazorpayPaymentDto,
 } from './fees.dto';
 
@@ -26,11 +28,15 @@ describe('FeesService', () => {
       findMany: jest.fn(),
       count: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     payment: {
       create: jest.fn(),
       findFirst: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      aggregate: jest.fn().mockResolvedValue({ _sum: { amount: null } }),
+      findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'pay-1', status: PaymentStatus.COMPLETED }),
     },
     receipt: {
       create: jest.fn(),
@@ -141,6 +147,8 @@ describe('FeesService', () => {
         invoiceId: 'inv-1',
         amount: 25000,
         status: PaymentStatus.PENDING,
+        transactionRef: 'order_123',
+        invoice: { amountDue: 25000 },
       });
 
       const dto = parseVerifyRazorpayPaymentDto({
@@ -151,10 +159,12 @@ describe('FeesService', () => {
       });
 
       await expect(service.verifyRazorpayPayment(dto, studentContext)).rejects.toThrow(BadRequestException);
-      expect(database.payment.update).toHaveBeenCalledWith({
-        where: { id: 'pay-1' },
+      // Failed only while still pending.
+      expect(database.payment.updateMany).toHaveBeenCalledWith({
+        where: { id: 'pay-1', collegeId: 'col-a', status: PaymentStatus.PENDING },
         data: { status: PaymentStatus.FAILED },
       });
+      expect(database.receipt.create).not.toHaveBeenCalled();
     });
 
     it('settles payment and generates receipt on valid test signature', async () => {
@@ -164,7 +174,10 @@ describe('FeesService', () => {
         invoiceId: 'inv-1',
         amount: 25000,
         status: PaymentStatus.PENDING,
+        transactionRef: 'order_123',
+        invoice: { amountDue: 25000 },
       });
+      database.payment.aggregate.mockResolvedValueOnce({ _sum: { amount: 25000 } });
       database.payment.update.mockResolvedValue({
         id: 'pay-1',
         status: PaymentStatus.COMPLETED,
@@ -190,6 +203,125 @@ describe('FeesService', () => {
 
       expect(result.success).toBe(true);
       expect(result.receipt).toHaveProperty('id', 'rec-1');
+      expect(database.payment.updateMany).toHaveBeenCalledWith({
+        where: { id: 'pay-1', collegeId: 'col-a', status: PaymentStatus.PENDING },
+        data: { status: PaymentStatus.COMPLETED, transactionRef: 'pay_rzp_123', paidAt: expect.any(Date) },
+      });
+      expect(database.invoice.update).toHaveBeenCalledWith({ where: { id: 'inv-1' }, data: { status: InvoiceStatus.PAID } });
+      expect(database.receipt.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ paymentId: 'pay-1', receiptNumber: expect.stringMatching(/^REC-\d{4}-[0-9A-F]{10}$/) }),
+      });
+    });
+  });
+
+  describe('payment rules', () => {
+    const pending = { id: 'pay-1', collegeId: 'col-a', invoiceId: 'inv-1', amount: 15000, status: PaymentStatus.PENDING, transactionRef: 'order_1', invoice: { amountDue: 25000 } };
+    const verify = (overrides: Record<string, string> = {}) =>
+      parseVerifyRazorpayPaymentDto({ paymentId: 'pay-1', razorpayOrderId: 'order_1', razorpayPaymentId: 'pay_rzp_1', razorpaySignature: 'test_sig_pay_rzp_1', ...overrides });
+    beforeEach(() => database.student.findFirst.mockResolvedValue({ id: 'stu-1' }));
+
+    it.each([InvoiceStatus.DRAFT, InvoiceStatus.VOID])('refuses an order for a %s invoice', async (status) => {
+      database.invoice.findFirst.mockResolvedValue({ id: 'inv-1', status, amountDue: 25000, invoiceNumber: 'INV-1' });
+      await expect(service.createRazorpayOrder({ invoiceId: 'inv-1' }, studentContext)).rejects.toMatchObject({ response: { code: 'INVOICE_NOT_PAYABLE' } });
+      expect(database.payment.create).not.toHaveBeenCalled();
+    });
+
+    it('orders only what is still owed after a part payment', async () => {
+      database.invoice.findFirst.mockResolvedValue({ id: 'inv-1', status: InvoiceStatus.PARTIALLY_PAID, amountDue: 25000, invoiceNumber: 'INV-1' });
+      database.payment.aggregate.mockResolvedValueOnce({ _sum: { amount: 10000 } });
+      database.payment.findFirst.mockResolvedValueOnce(null);
+      database.payment.create.mockResolvedValue({ id: 'pay-1' });
+      await expect(service.createRazorpayOrder({ invoiceId: 'inv-1' }, studentContext)).resolves.toMatchObject({ amount: 15000 });
+      expect(database.payment.aggregate).toHaveBeenCalledWith({ where: { collegeId: 'col-a', invoiceId: 'inv-1', status: PaymentStatus.COMPLETED }, _sum: { amount: true } });
+      expect(database.payment.create).toHaveBeenCalledWith({ data: expect.objectContaining({ amount: 15000, status: PaymentStatus.PENDING }) });
+    });
+
+    it('gives a second tab the open order instead of a second one, and closes any others', async () => {
+      database.invoice.findFirst.mockResolvedValue({ id: 'inv-1', status: InvoiceStatus.ISSUED, amountDue: 25000, invoiceNumber: 'INV-1' });
+      database.payment.findFirst.mockResolvedValueOnce({ id: 'pay-open', amount: 25000, status: PaymentStatus.PENDING, transactionRef: 'order_open' });
+      await expect(service.createRazorpayOrder({ invoiceId: 'inv-1' }, studentContext)).resolves.toMatchObject({ paymentId: 'pay-open', razorpayOrderId: 'order_open', amount: 25000 });
+      expect(database.payment.create).not.toHaveBeenCalled();
+      // The invoice is locked first, and every other open order for it is closed.
+      expect(database.invoice.updateMany).toHaveBeenCalledWith({ where: { id: 'inv-1', collegeId: 'col-a' }, data: { updatedAt: expect.any(Date) } });
+      expect(database.payment.updateMany).toHaveBeenCalledWith({
+        where: { collegeId: 'col-a', invoiceId: 'inv-1', status: PaymentStatus.PENDING, id: { not: 'pay-open' } },
+        data: { status: PaymentStatus.FAILED },
+      });
+    });
+
+    it('replaces an open order for an out-of-date amount', async () => {
+      database.invoice.findFirst.mockResolvedValue({ id: 'inv-1', status: InvoiceStatus.PARTIALLY_PAID, amountDue: 25000, invoiceNumber: 'INV-1' });
+      database.payment.aggregate.mockResolvedValueOnce({ _sum: { amount: 10000 } });
+      database.payment.findFirst.mockResolvedValueOnce({ id: 'pay-old', amount: 25000, status: PaymentStatus.PENDING, transactionRef: 'order_old' });
+      database.payment.create.mockResolvedValue({ id: 'pay-new', transactionRef: 'order_new' });
+      await expect(service.createRazorpayOrder({ invoiceId: 'inv-1' }, studentContext)).resolves.toMatchObject({ paymentId: 'pay-new', razorpayOrderId: 'order_new', amount: 15000 });
+      expect(database.payment.updateMany).toHaveBeenCalledWith({ where: { collegeId: 'col-a', invoiceId: 'inv-1', status: PaymentStatus.PENDING }, data: { status: PaymentStatus.FAILED } });
+      expect(database.payment.create).toHaveBeenCalledWith({ data: expect.objectContaining({ amount: 15000, transactionRef: expect.stringMatching(/^order_/) }) });
+    });
+
+    it('refuses an order when the payments already cover the invoice', async () => {
+      database.invoice.findFirst.mockResolvedValue({ id: 'inv-1', status: InvoiceStatus.ISSUED, amountDue: 25000, invoiceNumber: 'INV-1' });
+      database.payment.aggregate.mockResolvedValueOnce({ _sum: { amount: 25000 } });
+      await expect(service.createRazorpayOrder({ invoiceId: 'inv-1' }, studentContext)).rejects.toMatchObject({ response: { code: 'INVOICE_ALREADY_PAID' } });
+      expect(database.payment.create).not.toHaveBeenCalled();
+    });
+
+    it.each([PaymentStatus.COMPLETED, PaymentStatus.FAILED])('never changes a %s payment, whatever the signature', async (status) => {
+      database.payment.findFirst.mockResolvedValue({ ...pending, status });
+      await expect(service.verifyRazorpayPayment(verify(), studentContext)).rejects.toMatchObject({ response: { code: 'PAYMENT_NOT_PENDING' } });
+      await expect(service.verifyRazorpayPayment(verify({ razorpaySignature: 'bad' }), studentContext)).rejects.toBeInstanceOf(ConflictException);
+      expect(database.payment.updateMany).not.toHaveBeenCalled();
+      expect(database.receipt.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a signature for a different order', async () => {
+      database.payment.findFirst.mockResolvedValue(pending);
+      await expect(service.verifyRazorpayPayment(verify({ razorpayOrderId: 'order_other' }), studentContext)).rejects.toMatchObject({ response: { code: 'ORDER_MISMATCH' } });
+      expect(database.payment.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('settles a payment once even if two verifications race', async () => {
+      database.payment.findFirst.mockResolvedValue(pending);
+      database.payment.updateMany.mockResolvedValueOnce({ count: 0 });
+      await expect(service.verifyRazorpayPayment(verify(), studentContext)).rejects.toMatchObject({ response: { code: 'PAYMENT_NOT_PENDING' } });
+      expect(database.invoice.update).not.toHaveBeenCalled();
+      expect(database.receipt.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a Razorpay payment id that was already recorded for another order', async () => {
+      database.payment.findFirst.mockResolvedValue(pending);
+      database.payment.updateMany.mockRejectedValueOnce({ code: 'P2002', meta: { target: ['collegeId', 'transactionRef'] } });
+      await expect(service.verifyRazorpayPayment(verify(), studentContext)).rejects.toMatchObject({ response: { code: 'PAYMENT_ALREADY_RECORDED' } });
+      expect(database.receipt.create).not.toHaveBeenCalled();
+    });
+
+    it('marks the invoice partly paid while money is still owed', async () => {
+      database.payment.findFirst.mockResolvedValue(pending);
+      database.payment.aggregate.mockResolvedValueOnce({ _sum: { amount: 15000 } });
+      database.receipt.create.mockResolvedValue({ id: 'rec-1' });
+      await expect(service.verifyRazorpayPayment(verify(), studentContext)).resolves.toMatchObject({ success: true });
+      // The invoice row is locked before its payments are added up.
+      expect(database.invoice.updateMany).toHaveBeenCalledWith({ where: { id: 'inv-1', collegeId: 'col-a' }, data: { updatedAt: expect.any(Date) } });
+      expect(database.invoice.update).toHaveBeenCalledWith({ where: { id: 'inv-1' }, data: { status: InvoiceStatus.PARTIALLY_PAID } });
+    });
+
+    it('gives bad input a 400 and takes only online methods for an order', () => {
+      expect(() => parseCreateRazorpayOrderDto({})).toThrow(BadRequestException);
+      expect(() => parseCreateRazorpayOrderDto({ invoiceId: 'inv-1', method: 'CASH' })).toThrow(BadRequestException);
+      expect(() => parseCreateRazorpayOrderDto({ invoiceId: 'inv-1', method: 'bank_transfer' })).toThrow(BadRequestException);
+      expect(parseCreateRazorpayOrderDto({ invoiceId: 'inv-1', method: 'upi' })).toEqual({ invoiceId: 'inv-1', method: 'UPI' });
+      expect(parseCreateRazorpayOrderDto({ invoiceId: 'inv-1' })).toEqual({ invoiceId: 'inv-1', method: 'ONLINE' });
+      expect(() => parseVerifyRazorpayPaymentDto({ paymentId: 'pay-1' })).toThrow(BadRequestException);
+      expect(() => parseCreateInvoiceDto({ studentId: 'stu-1', amountDue: -5 })).toThrow(BadRequestException);
+      expect(() => parseCreateFeeStructureDto({ name: '', amount: 1, activeFrom: '2026-01-01' })).toThrow(BadRequestException);
+      expect(() => parseFeesListQuery({ page: 'abc' })).toThrow(BadRequestException);
+    });
+
+    it('numbers invoices so that a clash is practically impossible', async () => {
+      database.student.findFirst.mockResolvedValue({ id: 'stu-1' });
+      database.invoice.create.mockResolvedValue({ id: 'inv-9' });
+      await service.createInvoice(parseCreateInvoiceDto({ studentId: 'stu-1', amountDue: 1000 }), admin);
+      expect(database.invoice.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ invoiceNumber: expect.stringMatching(/^INV-\d{4}-[0-9A-F]{10}$/) }) }));
     });
   });
 });
@@ -230,8 +362,15 @@ describe('FeesService access and payment checks', () => {
   const hod: AuthorizationContext = { userId: 'hod-1', collegeId: 'col-a', roles: ['HOD'], permissions: [], departmentId: 'dept-a' };
   const database = {
     student: { findFirst: jest.fn().mockResolvedValue({ id: 'stu-1' }) },
-    invoice: { findFirst: jest.fn(), update: jest.fn() },
-    payment: { create: jest.fn().mockResolvedValue({ id: 'pay-1' }), findFirst: jest.fn(), update: jest.fn() },
+    invoice: { findFirst: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+    payment: {
+      create: jest.fn().mockResolvedValue({ id: 'pay-1' }),
+      findFirst: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      aggregate: jest.fn().mockResolvedValue({ _sum: { amount: null } }),
+      findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'pay-1' }),
+    },
     receipt: { findFirst: jest.fn(), create: jest.fn() },
     feeStructure: { create: jest.fn() },
     $transaction: jest.fn(),
@@ -261,7 +400,7 @@ describe('FeesService access and payment checks', () => {
 
   it('rejects the simulated signature once a real secret is configured, and accepts the real one', async () => {
     process.env.RAZORPAY_KEY_SECRET = 'real-secret';
-    database.payment.findFirst.mockResolvedValue({ id: 'pay-1', invoiceId: 'inv-1', amount: 100, status: PaymentStatus.PENDING });
+    database.payment.findFirst.mockResolvedValue({ id: 'pay-1', invoiceId: 'inv-1', amount: 100, status: PaymentStatus.PENDING, transactionRef: 'order_1', invoice: { amountDue: 100 } });
     await expect(service.verifyRazorpayPayment(dto('test_sig_pay_rzp_1'), studentContext)).rejects.toBeInstanceOf(BadRequestException);
     const real = createHmac('sha256', 'real-secret').update('order_1|pay_rzp_1').digest('hex');
     database.receipt.findFirst.mockResolvedValue(null);
