@@ -1,6 +1,21 @@
 import { authenticatedRequest } from './api-client';
 
-export type Department = { id: string; code: string; name: string; faculty?: Faculty[] };
+export type DepartmentHod = { facultyId: string; name: string; employeeCode: string; designation: string | null };
+export type DepartmentCounts = { faculty: number; students: number; courses: number; subjects: number };
+export type Department = {
+  id: string;
+  code: string;
+  name: string;
+  faculty?: { id: string; firstName: string; lastName: string; employeeCode: string }[];
+  hod?: DepartmentHod | null;
+  counts?: DepartmentCounts;
+};
+export type DepartmentDetail = Department & {
+  hod: DepartmentHod | null;
+  counts: DepartmentCounts;
+  courses: { id: string; code: string; name: string; durationYears: number; semesters: number }[];
+  subjects: { id: string; code: string; name: string; credits: number; course: { code: string }; semester: { name: string; number: number } }[];
+};
 export type AccountStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
 /** Sign-in email and status; sent to Admin and HOD only, null when the person has no account. */
 export type FacultyAccount = { email: string; status: AccountStatus } | null;
@@ -46,6 +61,10 @@ export const setFacultyAccountStatus = (id: string, status: 'ACTIVE' | 'INACTIVE
   authenticatedRequest(`/faculty/${id}/account`, { method: 'PUT', body: JSON.stringify({ status }) });
 export const listDepartments = (q = new URLSearchParams()): Promise<List<Department>> => authenticatedRequest(`/departments?${q}`);
 export const createDepartment = (input: { code: string; name: string }): Promise<Department> => authenticatedRequest('/departments', { method: 'POST', body: JSON.stringify(input) });
+export const getDepartment = (id: string): Promise<DepartmentDetail> => authenticatedRequest(`/departments/${id}`);
+/** Admin assigns or changes the HOD; null removes them. */
+export const setDepartmentHod = (id: string, facultyId: string | null): Promise<DepartmentDetail> =>
+  authenticatedRequest(`/departments/${id}/hod`, { method: 'PUT', body: JSON.stringify({ facultyId }) });
 export const updateDepartment = (id: string, input: { code?: string; name?: string }): Promise<Department> =>
   authenticatedRequest(`/departments/${id}`, { method: 'PUT', body: JSON.stringify(input) });
 

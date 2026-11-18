@@ -332,7 +332,9 @@ function AdminDashboard() {
                   {overview.departments.map((department) => (
                     <tr key={department.id}>
                       <TableCell>
-                        <p className="font-semibold">{department.name}</p>
+                        <Link href={`/dashboard/departments/${department.id}`} className="font-semibold hover:underline">
+                          {department.name}
+                        </Link>
                         <p className="text-xs text-[hsl(var(--muted-foreground))]">{department.code}</p>
                       </TableCell>
                       <TableCell>
