@@ -43,12 +43,17 @@ const oneOf = <T extends string>(v: unknown, values: readonly T[]): T => {
 const AUDIENCES = Object.values(AnnouncementAudience);
 const CATEGORIES = Object.values(AnnouncementCategory);
 
-const dates = (b: Body): { publishedAt?: Date; expiresAt?: Date } => {
+/**
+ * A new announcement must still be live when it goes out: it expires after it is published, and after now. An edit only
+ * needs the expiry after the publish time (checked against the stored one too), so an expired announcement can still be
+ * corrected without changing its expiry.
+ */
+const dates = (b: Body, isNew: boolean): { publishedAt?: Date; expiresAt?: Date } => {
   const publishedAt = optionalDate(b.publishedAt);
   const expiresAt = optionalDate(b.expiresAt);
-  // An announcement must still be live when it goes out: it expires after it is published, and after now.
   const now = new Date();
-  if (expiresAt && expiresAt <= (publishedAt && publishedAt > now ? publishedAt : now)) invalid();
+  const earliest = isNew ? (publishedAt && publishedAt > now ? publishedAt : now) : publishedAt;
+  if (expiresAt && earliest && expiresAt <= earliest) invalid();
   return { publishedAt, expiresAt };
 };
 
@@ -68,12 +73,12 @@ const fields = (b: Body): Omit<CreateAnnouncementDto, 'publishedAt' | 'expiresAt
 
 export const parseCreateAnnouncementDto = (v: unknown): CreateAnnouncementDto => {
   const b = object(v);
-  return { ...fields(b), ...dates(b) };
+  return { ...fields(b), ...dates(b, true) };
 };
 
 export const parseUpdateAnnouncementDto = (v: unknown): UpdateAnnouncementDto => {
   const b = object(v);
-  const { publishedAt, expiresAt } = dates(b);
+  const { publishedAt, expiresAt } = dates(b, false);
   return { ...fields(b), publishedAt, expiresAt: expiresAt ?? null };
 };
 

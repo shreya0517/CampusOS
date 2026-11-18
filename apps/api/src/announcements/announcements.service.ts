@@ -156,39 +156,76 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
         ...target,
         publishedAt,
         expiresAt: input.expiresAt,
-        // A scheduled announcement is left for the delivery check to announce when its time comes.
-        notifiedAt: dueNow ? now : null,
       },
       include,
     });
-    if (dueNow) await this.announce(announcement);
-    return announcement;
+    // Due now: delivered straight away. A scheduled one is left for the delivery check.
+    const delivered = dueNow && (await this.deliverSafely(announcement, now));
+    return delivered ? { ...announcement, notifiedAt: now } : announcement;
   }
 
-  /**
-   * Announces scheduled announcements whose time has come, oldest first. Each one is claimed with a conditional update
-   * before anyone is notified, so it goes out once even if checks overlap or several API instances run. One that expired
-   * before its turn is marked done without notifying anyone.
-   */
+  /** Delivers scheduled announcements whose time has come, oldest first. Returns how many were announced. */
   async deliverDue(now = new Date()): Promise<number> {
     if (this.delivering) return 0;
     this.delivering = true;
     let delivered = 0;
     try {
       const due = await this.database.announcement.findMany({ where: { notifiedAt: null, archivedAt: null, publishedAt: { lte: now } }, orderBy: { publishedAt: 'asc' }, take: DELIVERY_BATCH });
-      for (const announcement of due) {
-        // Archived after it was found: the claim fails and it is not delivered.
-        const claimed = await this.database.announcement.updateMany({ where: { id: announcement.id, notifiedAt: null, archivedAt: null }, data: { notifiedAt: now } });
-        if (claimed.count !== 1 || (announcement.expiresAt && announcement.expiresAt <= now)) continue;
-        await this.announce(announcement);
-        delivered += 1;
-      }
+      for (const announcement of due) if (await this.deliverSafely(announcement, now)) delivered += 1;
     } catch (error) {
       this.logger.error(`Scheduled announcements could not be delivered: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       this.delivering = false;
     }
     return delivered;
+  }
+
+  /**
+   * Delivers one announcement, exactly once. The claim (a conditional update of notifiedAt) and the notifications are
+   * written in one transaction, and the claim holds the row lock until they are stored: an archive either commits first,
+   * and the claim finds nothing to deliver, or waits until delivery has finished. So an archived announcement is never
+   * delivered, and two checks (or API instances) never both deliver it. Recipients are read from the claimed row, so a
+   * target edited just before delivery is the one used. One that expired before its turn is marked done without
+   * notifying anyone. Returns whether this call announced it.
+   */
+  private async deliver(announcement: Pick<Announcement, 'id'>, now: Date): Promise<boolean> {
+    const notifications = this.notifications;
+    const pending: { push?: () => void } = {};
+    const announced = await this.database.$transaction(
+      async (tx) => {
+        const claim = await tx.announcement.updateMany({ where: { id: announcement.id, notifiedAt: null, archivedAt: null }, data: { notifiedAt: now } });
+        if (claim.count !== 1) return false;
+        const row = await tx.announcement.findUniqueOrThrow({ where: { id: announcement.id } });
+        if (row.expiresAt && row.expiresAt <= now) return false;
+        if (notifications) {
+          const users = (await this.recipients(row, notifications)).filter((id) => id !== row.authorId);
+          pending.push = await notifications.store(tx, row.collegeId, users, {
+            category: 'ANNOUNCEMENT',
+            title: `Announcement: ${row.title}`,
+            body: row.body.length > 160 ? `${row.body.slice(0, 157)}...` : row.body,
+            link: '/dashboard/announcements',
+          });
+        }
+        return true;
+      },
+      { timeout: 30_000 },
+    );
+    // Pushed live only once the notifications are committed.
+    pending.push?.();
+    return announced;
+  }
+
+  /**
+   * Delivery never fails the request that triggered it: an error is logged and the announcement stays unclaimed, so the
+   * next check delivers it.
+   */
+  private async deliverSafely(announcement: Pick<Announcement, 'id'>, now: Date): Promise<boolean> {
+    try {
+      return await this.deliver(announcement, now);
+    } catch (error) {
+      this.logger.error(`Announcement ${announcement.id} could not be delivered yet: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
   }
 
   /**
@@ -249,14 +286,14 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
           ...target,
           publishedAt,
           expiresAt: input.expiresAt,
-          ...(dueNow ? { notifiedAt: now } : {}),
         },
       });
       if (written.count !== 1) throw new ConflictException({ code: 'ANNOUNCEMENT_CHANGED', message: 'This announcement was just published. Reload it and try again.' });
       await tx.auditLog.create({ data: { collegeId: context.collegeId, actorId: context.userId, action: 'ANNOUNCEMENT_UPDATED', entityType: 'Announcement', entityId: id } });
     });
+    // Moved to now: delivered straight away, with the edited target.
+    if (dueNow) await this.deliverSafely({ id }, now);
     const updated = await this.database.announcement.findFirstOrThrow({ where: { id, collegeId: context.collegeId }, include });
-    if (dueNow) await this.announce(updated);
     return { ...updated, state: stateOf(updated, now) };
   }
 
@@ -361,18 +398,5 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
         : Promise.resolve([]),
     ]);
     return [...new Set([...admins, ...students.map((row) => row.userId as string), ...faculty.map((row) => row.userId as string), ...hods])];
-  }
-
-  /** Notifies everyone the announcement is for. Best effort: a failure is logged and never undoes the announcement. */
-  private async announce(announcement: Announcement): Promise<void> {
-    await this.notifications?.safely(async (notifications) => {
-      const users = await this.recipients(announcement, notifications);
-      await notifications.notify(announcement.collegeId, users.filter((id) => id !== announcement.authorId), {
-        category: 'ANNOUNCEMENT',
-        title: `Announcement: ${announcement.title}`,
-        body: announcement.body.length > 160 ? `${announcement.body.slice(0, 157)}...` : announcement.body,
-        link: '/dashboard/announcements',
-      });
-    });
   }
 }

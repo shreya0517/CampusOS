@@ -84,7 +84,8 @@ describe('NotificationsService', () => {
 
 describe('notification producers', () => {
   it('tells the announcement audience, but not the author and not for a scheduled one', async () => {
-    const notifications = { notify: jest.fn(), usersWithRoles: jest.fn().mockResolvedValue(['user-admin', 'user-stu-1', 'user-stu-2']), safely: (work: (n: unknown) => Promise<void>) => work(notifications) };
+    const push = jest.fn();
+    const notifications = { store: jest.fn().mockResolvedValue(push), usersWithRoles: jest.fn().mockResolvedValue(['user-admin', 'user-stu-1', 'user-stu-2']) };
     const created = {
       id: 'a1',
       collegeId: 'col-a',
@@ -96,26 +97,41 @@ describe('notification producers', () => {
       semesterNumber: null,
       sectionId: null,
       publishedAt: new Date(Date.now() - 1000),
+      expiresAt: null,
     };
-    const database = { announcement: { create: jest.fn().mockResolvedValue(created) } };
+    const database = {
+      announcement: { create: jest.fn().mockResolvedValue(created), updateMany: jest.fn().mockResolvedValue({ count: 1 }), findUniqueOrThrow: jest.fn().mockResolvedValue(created) },
+      $transaction: jest.fn(),
+    };
+    database.$transaction.mockImplementation((work: (tx: typeof database) => Promise<unknown>) => work(database));
     const service = new AnnouncementsService(database as never, notifications as never);
     const input = { title: 'Holiday', body: 'College closed on Friday.', audience: 'STUDENTS' as const, category: 'HOLIDAY' as const, target: {} };
     await service.create(input, admin);
     expect(notifications.usersWithRoles).toHaveBeenCalledWith('col-a', ['STUDENT']);
-    expect(notifications.notify).toHaveBeenCalledWith('col-a', ['user-stu-1', 'user-stu-2'], expect.objectContaining({ category: 'ANNOUNCEMENT', title: 'Announcement: Holiday', link: '/dashboard/announcements' }));
+    expect(notifications.store).toHaveBeenCalledWith(database, 'col-a', ['user-stu-1', 'user-stu-2'], expect.objectContaining({ category: 'ANNOUNCEMENT', title: 'Announcement: Holiday', link: '/dashboard/announcements' }));
+    expect(push).toHaveBeenCalledTimes(1);
 
-    notifications.notify.mockClear();
+    notifications.store.mockClear();
     const later = new Date(Date.now() + 86_400_000);
     database.announcement.create.mockResolvedValue({ ...created, publishedAt: later });
     await service.create({ ...input, title: 'Later', publishedAt: later }, admin);
-    expect(notifications.notify).not.toHaveBeenCalled();
+    expect(notifications.store).not.toHaveBeenCalled();
 
     // A failing recipient lookup doesn't fail the request: the announcement is saved and returned.
-    const real = new NotificationsService({} as never, { emitToUser: jest.fn() } as never);
-    type Fake = { usersWithRoles: jest.Mock; notify: jest.Mock; safely: (work: (n: Fake) => Promise<void>) => Promise<void> };
-    const failing: Fake = { usersWithRoles: jest.fn().mockRejectedValue(new Error('db down')), notify: jest.fn(), safely: (work) => real.safely(() => work(failing)) };
+    notifications.usersWithRoles.mockRejectedValueOnce(new Error('db down'));
     database.announcement.create.mockResolvedValue(created);
-    await expect(new AnnouncementsService(database as never, failing as never).create(input, admin)).resolves.toMatchObject({ id: 'a1' });
+    await expect(service.create(input, admin)).resolves.toMatchObject({ id: 'a1' });
+  });
+
+  it('stores notifications with the caller\'s client and pushes them only when asked', async () => {
+    const events = { emitToUser: jest.fn() };
+    const client = { notification: { createMany: jest.fn() } };
+    const service = new NotificationsService({} as never, events as never);
+    const push = await service.store(client as never, 'col-a', ['user-1', 'user-1', null, 'user-2'], { category: 'ANNOUNCEMENT', title: 'Holiday', body: 'Closed' });
+    expect(client.notification.createMany).toHaveBeenCalledWith({ data: [expect.objectContaining({ userId: 'user-1' }), expect.objectContaining({ userId: 'user-2' })] });
+    expect(events.emitToUser).not.toHaveBeenCalled();
+    push();
+    expect(events.emitToUser).toHaveBeenCalledTimes(2);
   });
 
   it("asks every Admin and the host department's HOD to approve a visitor, and tells the registrant the outcome", async () => {
