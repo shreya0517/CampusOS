@@ -18,8 +18,11 @@ function formatDate(iso: string): string {
 }
 
 export default function AttendancePage() {
-  const { primaryRole } = useAuth();
-  const canMarkAttendance = primaryRole === 'Admin' || primaryRole === 'HOD' || primaryRole === 'Faculty';
+  const { primaryRole, user } = useAuth();
+  // Admin decision 2: Admin monitors attendance (the report) but faculty and HODs record it.
+  const canMarkAttendance = primaryRole === 'HOD' || primaryRole === 'Faculty';
+  // The report API admits ADMIN and HOD only, so check the real roles (a super-admin also shows as "Admin").
+  const canSeeReport = Boolean(user?.roles?.some((role) => role === 'ADMIN' || role === 'HOD'));
 
   const [sessions, setSessions] = useState<AttendanceSession[]>([]);
   const [total, setTotal] = useState(0);
@@ -48,18 +51,31 @@ export default function AttendancePage() {
     <div className="grid gap-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[.16em] text-[hsl(var(--primary))]">Attendance</p>
-          <h1 className="mt-2 text-2xl font-bold tracking-tight">Attendance management</h1>
-          <p className="mt-2 text-[hsl(var(--muted-foreground))]">Mark and review attendance sessions for classes.</p>
+          <h1 className="text-2xl font-bold tracking-tight">Attendance</h1>
+          <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+            {primaryRole === 'Admin' ? 'Attendance sessions recorded across the college. Faculty mark attendance and HODs correct it.' : 'Mark and review attendance sessions for classes.'}
+          </p>
         </div>
-        {canMarkAttendance && (
-          <Link
-            href="/dashboard/attendance/new"
-            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-[var(--radius)] bg-[hsl(var(--primary))] px-4 text-sm font-semibold text-[hsl(var(--primary-foreground))] transition hover:brightness-95"
-          >
-            Mark attendance
-          </Link>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {canSeeReport && (
+            <Link
+              href="/dashboard/attendance/report"
+              className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-[var(--radius)] px-4 text-sm font-semibold transition ${
+                canMarkAttendance ? 'border bg-[hsl(var(--card))] shadow-sm hover:bg-[hsl(var(--muted))]' : 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-sm hover:brightness-110'
+              }`}
+            >
+              Attendance report
+            </Link>
+          )}
+          {canMarkAttendance && (
+            <Link
+              href="/dashboard/attendance/new"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-[var(--radius)] bg-[hsl(var(--primary))] px-4 text-sm font-semibold text-[hsl(var(--primary-foreground))] shadow-sm transition hover:brightness-110"
+            >
+              Mark attendance
+            </Link>
+          )}
+        </div>
       </div>
 
       <Card>

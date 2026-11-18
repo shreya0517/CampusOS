@@ -49,3 +49,25 @@ export type ClassOverview = {
 export const listMyClasses = (): Promise<MyClass[]> => authenticatedRequest('/classes/mine');
 export const getClassOverview = (id: string): Promise<ClassOverview> => authenticatedRequest(`/classes/${id}/overview`);
 export const getMyAttendance = (q: URLSearchParams = new URLSearchParams()): Promise<MyAttendance> => authenticatedRequest(`/attendance/me?${q}`);
+
+/** Attendance monitoring for Admin (all departments or one) and HOD (their own). */
+export type AttendanceReport = {
+  range: { from: string; to: string };
+  threshold: number;
+  sessions: number;
+  overall: AttendanceSummary;
+  byDepartment: (AttendanceSummary & { department: { id: string; code: string; name: string } })[];
+  byClass: (AttendanceSummary & {
+    classId: string;
+    subject: ClassSubject;
+    section: { code: string; semester: string; course: string; department: string };
+    faculty: { id: string; name: string } | null;
+    sessions: number;
+  })[];
+  byMonth: (AttendanceSummary & { month: string })[];
+  shortages: (AttendanceSummary & { student: { id: string; studentCode: string; name: string }; section: string | null })[];
+  /** Students short in all; `shortages` holds at most 500 of them, lowest first. */
+  shortageTotal: number;
+  shortagesTruncated: boolean;
+};
+export const getAttendanceReport = (q: URLSearchParams): Promise<AttendanceReport> => authenticatedRequest(`/attendance/report?${q}`);

@@ -159,8 +159,14 @@ export class AttendanceService {
     return { items, total, page: query.page, pageSize: query.pageSize };
   }
 
-  async createAttendance(input: CreateAttendanceDto, context: AuthorizationContext) {
+  /** Admin decision 2: an Admin who isn't also HOD or faculty monitors attendance but doesn't mark or edit it. */
+  private assertMayRecord(context: AuthorizationContext): void {
     if (context.roles.includes('STUDENT')) denied();
+    if (!context.roles.includes('HOD') && !context.roles.includes('FACULTY')) denied();
+  }
+
+  async createAttendance(input: CreateAttendanceDto, context: AuthorizationContext) {
+    this.assertMayRecord(context);
     const cls = await this.resolveClass(input.classId, context);
     await this.assertStudentsInSection(cls.sectionId, input.records.map((r) => r.studentId), context);
     try {
@@ -262,7 +268,7 @@ export class AttendanceService {
   }
 
   async updateAttendance(id: string, input: UpdateAttendanceDto, context: AuthorizationContext) {
-    if (context.roles.includes('STUDENT')) denied();
+    this.assertMayRecord(context);
     const attendance = await this.getAttendance(id, context);
     const facultyOnly = context.roles.includes('FACULTY') && !context.roles.includes('HOD') && !context.roles.includes('ADMIN');
     if (facultyOnly && new Date() > new Date(attendance.correctionWindowEndsAt)) {

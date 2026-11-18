@@ -79,8 +79,10 @@ export default function AttendanceDetailPage() {
     }
   };
 
-  // Faculty can correct a session for 48 hours after marking it; HOD and Admin are not limited by this window.
+  // Faculty can correct a session for 48 hours after marking it; the HOD is not limited by this window. Admin only
+  // reviews attendance (Admin decision 2).
   const windowClosed = primaryRole === 'Faculty' && new Date() > new Date(session.correctionWindowEndsAt);
+  const canCorrect = primaryRole !== 'Admin' && !windowClosed;
   const markedBy = history.find((entry) => entry.action === 'ATTENDANCE_MARKED')?.actor?.displayName;
 
   const summary: Record<AttendanceStatus, number> = { PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0 };
@@ -102,7 +104,7 @@ export default function AttendanceDetailPage() {
             {primaryRole === 'Faculty' && !windowClosed ? ` · You can correct it until ${formatDateTime(session.correctionWindowEndsAt)}` : ''}
           </p>
         </div>
-        {!editing && !windowClosed && (
+        {!editing && canCorrect && (
           <Button variant="outline" onClick={() => setEditing(true)}>Edit records</Button>
         )}
       </div>
