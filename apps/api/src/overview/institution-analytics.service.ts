@@ -2,7 +2,8 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundEx
 import type { SubmissionStatus } from '@prisma/client';
 import { DatabaseService } from '../database.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
-import { ATTENDANCE_THRESHOLD_PERCENT, count, emptyTally, summarize } from '../attendance/attendance.service';
+import { count, emptyTally, summarize } from '../attendance/attendance.service';
+import { collegePolicy } from '../settings/college-policy';
 import type { Tally } from '../attendance/attendance.service';
 import { todayAsStoredDate } from './institution-overview.service';
 
@@ -35,6 +36,8 @@ type Scope = {
   today: Date;
   now: Date;
   months: string[];
+  /** The college's minimum attendance, in percent. */
+  threshold: number;
   sectionInfo: Map<string, SectionInfo>;
   semesterInfo: Map<string, { number: number; courseId: string; departmentId: string }>;
   courses: Map<string, Course>;
@@ -107,8 +110,8 @@ export class InstitutionAnalyticsService {
     if (!context.roles.includes('ADMIN')) denied();
     const collegeId = context.collegeId;
 
-    const [college, departments, courses, semesters, sections, enrollments] = await Promise.all([
-      this.database.college.findUnique({ where: { id: collegeId }, select: { timezone: true } }),
+    const [policy, departments, courses, semesters, sections, enrollments] = await Promise.all([
+      collegePolicy(this.database, collegeId),
       this.database.department.findMany({ where: { collegeId }, select: { id: true, code: true, name: true }, orderBy: { name: 'asc' } }),
       this.database.course.findMany({ where: { collegeId }, select: { id: true, code: true, name: true, departmentId: true }, orderBy: { code: 'asc' } }),
       this.database.semester.findMany({ where: { collegeId }, select: { id: true, number: true, courseId: true } }),
@@ -119,7 +122,7 @@ export class InstitutionAnalyticsService {
       throw new NotFoundException({ code: 'DEPARTMENT_NOT_FOUND', message: 'Department not found.' });
     }
 
-    const today = todayAsStoredDate(college?.timezone);
+    const today = todayAsStoredDate(policy.timezone);
     const to = query.to ? new Date(query.to) : today;
     const from = query.from ? new Date(query.from) : new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth() - (ANALYTICS_DEFAULT_MONTHS - 1), 1));
     if (from > to) throw new BadRequestException({ code: 'INVALID_RANGE', message: 'The start date must be on or before the end date.' });
@@ -152,6 +155,7 @@ export class InstitutionAnalyticsService {
 
     const scope: Scope = {
       collegeId,
+      threshold: policy.attendanceThreshold,
       departmentId: query.departmentId,
       semester: query.semester,
       from,
@@ -184,7 +188,7 @@ export class InstitutionAnalyticsService {
         departments,
         semesters: [...new Set(semesters.map((semester) => semester.number))].sort((a, b) => a - b),
       },
-      threshold: ATTENDANCE_THRESHOLD_PERCENT,
+      threshold: scope.threshold,
       students: students.summary,
       faculty: faculty.summary,
       attendance: attendance.summary,
@@ -201,7 +205,7 @@ export class InstitutionAnalyticsService {
           students: active,
           faculty: facultyCount,
           studentsPerFaculty: facultyCount ? round1((students.activeByDepartmentAllSemesters.get(department.id)?.size ?? 0) / facultyCount) : null,
-          attendance: summarize(attendance.byDepartment.get(department.id) ?? emptyTally()).percentage,
+          attendance: summarize(attendance.byDepartment.get(department.id) ?? emptyTally(), scope.threshold).percentage,
           shortage: attendance.shortageByDepartment.get(department.id) ?? 0,
           assignmentCompletion: work ? percent(work.submitted, work.expected) : null,
           passPercentage: papers ? percent(papers.passed, papers.entries) : null,
@@ -339,7 +343,7 @@ export class InstitutionAnalyticsService {
     let short = 0;
     const shortageByDepartment = new Map<string, number>();
     for (const [studentId, tally] of perStudent) {
-      const summary = summarize(tally);
+      const summary = summarize(tally, scope.threshold);
       if (summary.percentage === null) continue;
       counted += 1;
       if (!summary.belowThreshold) continue;
@@ -353,9 +357,9 @@ export class InstitutionAnalyticsService {
       shortageByDepartment,
       summary: {
         sessions: sessions.length,
-        overall: summarize(overall),
-        bySemester: [...bySemester.entries()].sort((a, b) => a[0] - b[0]).map(([semester, tally]) => ({ semester, ...summarize(tally) })),
-        byMonth: scope.months.map((month) => ({ month, ...summarize(byMonth.get(month) ?? emptyTally()) })),
+        overall: summarize(overall, scope.threshold),
+        bySemester: [...bySemester.entries()].sort((a, b) => a[0] - b[0]).map(([semester, tally]) => ({ semester, ...summarize(tally, scope.threshold) })),
+        byMonth: scope.months.map((month) => ({ month, ...summarize(byMonth.get(month) ?? emptyTally(), scope.threshold) })),
         shortage: { students: short, counted, percentage: percent(short, counted) },
       },
     };

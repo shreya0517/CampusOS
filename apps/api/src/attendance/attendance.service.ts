@@ -3,12 +3,9 @@ import { DatabaseService } from '../database.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
 import type { AttendanceStatus } from '@prisma/client';
 import type { AttendanceListQuery, ClassListQuery, CreateAttendanceDto, MyAttendanceQuery, UpdateAttendanceDto } from './attendance.dto';
+import { collegePolicy } from '../settings/college-policy';
 
-/** Minimum attendance a student needs per subject; the dashboard already shows this as the college policy. */
-export const ATTENDANCE_THRESHOLD_PERCENT = 75;
-
-/** Faculty may correct a session for this long after first marking it; later corrections go through the HOD. */
-export const ATTENDANCE_CORRECTION_WINDOW_HOURS = 48;
+// The minimum attendance and the faculty correction window are the college's own, set by an Admin in Settings.
 
 const denied = (): never => { throw new ForbiddenException({ code: 'FORBIDDEN', message: 'You are not authorized to access this resource.' }); };
 const missing = (): never => { throw new NotFoundException({ code: 'ATTENDANCE_NOT_FOUND', message: 'Attendance session was not found.' }); };
@@ -56,7 +53,7 @@ export class AttendanceService {
   }
 
   /** Attendance totals per class, so lists and rosters show the same percentages as the student view. */
-  private async classAttendance(classId: string, context: AuthorizationContext) {
+  private async classAttendance(classId: string, context: AuthorizationContext, threshold: number) {
     const grouped = await this.database.attendanceRecord.groupBy({
       by: ['status'],
       where: { collegeId: context.collegeId, attendance: { classId } },
@@ -64,7 +61,7 @@ export class AttendanceService {
     });
     const tally = emptyTally();
     for (const row of grouped) count(tally, row.status, row._count._all);
-    return summarize(tally);
+    return summarize(tally, threshold);
   }
 
   /** The classes the signed-in staff member teaches, with enrolment, sessions held, attendance and coursework counts. */
@@ -82,13 +79,14 @@ export class AttendanceService {
       _count: { _all: true },
     });
     const enrolledBySection = new Map(enrolled.map((row) => [row.sectionId, row._count._all]));
+    const { attendanceThreshold } = await collegePolicy(this.database, context.collegeId);
     return Promise.all(
       classes.map(async ({ _count, ...cls }) => ({
         ...cls,
         studentCount: enrolledBySection.get(cls.sectionId) ?? 0,
         sessionsHeld: _count.attendances,
         assignmentCount: _count.assignments,
-        attendance: await this.classAttendance(cls.id, context),
+        attendance: await this.classAttendance(cls.id, context, attendanceThreshold),
         // Submitted work that still needs marks.
         pendingEvaluations: await this.database.submission.count({ where: { collegeId: context.collegeId, assignment: { classId: cls.id }, status: { in: ['SUBMITTED', 'LATE'] } } }),
       })),
@@ -102,7 +100,7 @@ export class AttendanceService {
   async getClassOverview(classId: string, context: AuthorizationContext) {
     if (context.roles.includes('STUDENT')) denied();
     const cls = await this.resolveClass(classId, context);
-    const [enrollments, recordCounts, sessionsHeld, assignments, submissionCounts] = await Promise.all([
+    const [enrollments, recordCounts, sessionsHeld, assignments, submissionCounts, policy] = await Promise.all([
       this.database.enrollment.findMany({
         where: { collegeId: context.collegeId, sectionId: cls.sectionId, status: 'ACTIVE' },
         select: { student: { select: { id: true, studentCode: true, firstName: true, lastName: true } } },
@@ -117,7 +115,9 @@ export class AttendanceService {
         orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
       }),
       this.database.submission.groupBy({ by: ['studentId'], where: { collegeId: context.collegeId, assignment: { classId }, status: { not: 'DRAFT' } }, _count: { _all: true } }),
+      collegePolicy(this.database, context.collegeId),
     ]);
+    const threshold = policy.attendanceThreshold;
 
     const tallies = new Map<string, Tally>();
     for (const row of recordCounts) {
@@ -128,7 +128,7 @@ export class AttendanceService {
     const submitted = new Map(submissionCounts.map((row) => [row.studentId, row._count._all]));
     const students = enrollments.map(({ student }) => ({
       student,
-      attendance: summarize(tallies.get(student.id) ?? emptyTally()),
+      attendance: summarize(tallies.get(student.id) ?? emptyTally(), threshold),
       submittedAssignments: submitted.get(student.id) ?? 0,
     }));
     const overall = emptyTally();
@@ -141,9 +141,9 @@ export class AttendanceService {
 
     return {
       class: cls,
-      threshold: ATTENDANCE_THRESHOLD_PERCENT,
+      threshold,
       sessionsHeld,
-      attendance: summarize(overall),
+      attendance: summarize(overall, threshold),
       students,
       assignments: assignments.map(({ _count, ...assignment }) => ({ ...assignment, submissions: _count.submissions })),
     };
@@ -183,7 +183,7 @@ export class AttendanceService {
         });
         return created;
       });
-      return withCorrectionWindow(attendance);
+      return withCorrectionWindow(attendance, (await collegePolicy(this.database, context.collegeId)).correctionWindowHours);
     } catch (error) {
       if (isUnique(error)) throw new ConflictException({ code: 'ATTENDANCE_EXISTS', message: 'Attendance for this class on this date already exists.' });
       throw error;
@@ -208,9 +208,12 @@ export class AttendanceService {
 
   async getAttendance(id: string, context: AuthorizationContext) {
     if (context.roles.includes('STUDENT')) denied();
-    const item = await this.database.attendance.findFirst({ where: { id, collegeId: context.collegeId, class: this.classWhere(context) }, include: attendanceInclude });
+    const [item, policy] = await Promise.all([
+      this.database.attendance.findFirst({ where: { id, collegeId: context.collegeId, class: this.classWhere(context) }, include: attendanceInclude }),
+      collegePolicy(this.database, context.collegeId),
+    ]);
     if (!item) missing();
-    return withCorrectionWindow(item!);
+    return withCorrectionWindow(item!, policy.correctionWindowHours);
   }
 
   /**
@@ -251,13 +254,14 @@ export class AttendanceService {
     }
 
     const start = (query.page - 1) * query.pageSize;
+    const threshold = (await collegePolicy(this.database, context.collegeId)).attendanceThreshold;
     return {
-      threshold: ATTENDANCE_THRESHOLD_PERCENT,
-      overall: summarize(overall),
+      threshold,
+      overall: summarize(overall, threshold),
       subjects: [...subjects.values()]
-        .map(({ subject, faculty, tally }) => ({ subject, faculty, ...summarize(tally) }))
+        .map(({ subject, faculty, tally }) => ({ subject, faculty, ...summarize(tally, threshold) }))
         .sort((a, b) => a.subject.name.localeCompare(b.subject.name)),
-      days: [...days.entries()].map(([date, tally]) => ({ date, ...summarize(tally) })).sort((a, b) => a.date.localeCompare(b.date)),
+      days: [...days.entries()].map(([date, tally]) => ({ date, ...summarize(tally, threshold) })).sort((a, b) => a.date.localeCompare(b.date)),
       records: {
         items: filtered.slice(start, start + query.pageSize).map((record) => ({ id: record.id, status: record.status, note: record.note, heldOn: dateKey(record.attendance.heldOn), subject: record.attendance.class.subject })),
         total: filtered.length,
@@ -272,7 +276,7 @@ export class AttendanceService {
     const attendance = await this.getAttendance(id, context);
     const facultyOnly = context.roles.includes('FACULTY') && !context.roles.includes('HOD') && !context.roles.includes('ADMIN');
     if (facultyOnly && new Date() > new Date(attendance.correctionWindowEndsAt)) {
-      throw new ForbiddenException({ code: 'CORRECTION_WINDOW_CLOSED', message: `Attendance can only be corrected within ${ATTENDANCE_CORRECTION_WINDOW_HOURS} hours of being marked. Ask your HOD to correct it.` });
+      throw new ForbiddenException({ code: 'CORRECTION_WINDOW_CLOSED', message: `Attendance can only be corrected within ${attendance.correctionWindowHours} hours of being marked. Ask your HOD to correct it.` });
     }
     await this.assertStudentsInSection(attendance.class.sectionId, input.records.map((r) => r.studentId), context);
     const before = new Map(attendance.records.map((r) => [r.studentId, { status: r.status, note: r.note ?? null }]));
@@ -364,20 +368,27 @@ export const count = (tally: Tally, status: AttendanceStatus, amount = 1): void 
   else tally.excused += amount;
 };
 
-/** Late counts as attended. Excused sessions are left out of the percentage instead of counting against the student. */
-export const summarize = (tally: Tally) => {
+/**
+ * Late counts as attended. Excused sessions are left out of the percentage instead of counting against the student.
+ * `threshold` is the college's minimum attendance, in percent.
+ */
+export const summarize = (tally: Tally, threshold: number) => {
   const attended = tally.present + tally.late;
   const counted = attended + tally.absent;
   const percentage = counted === 0 ? null : Math.round((attended / counted) * 1000) / 10;
-  return { ...tally, attended, counted, percentage, belowThreshold: percentage !== null && percentage < ATTENDANCE_THRESHOLD_PERCENT };
+  return { ...tally, attended, counted, percentage, belowThreshold: percentage !== null && percentage < threshold };
 };
 
 const dateKey = (date: Date): string => date.toISOString().slice(0, 10);
 
-/** Adds when the faculty correction window closes, counted from when the session was first saved. */
-const withCorrectionWindow = <T extends { createdAt: Date }>(attendance: T): T & { correctionWindowEndsAt: string } => ({
+/**
+ * Adds when the faculty correction window closes, counted from when the session was first saved. The college's current
+ * window applies to every session, so shortening it in Settings also closes older sessions sooner.
+ */
+const withCorrectionWindow = <T extends { createdAt: Date }>(attendance: T, hours: number): T & { correctionWindowHours: number; correctionWindowEndsAt: string } => ({
   ...attendance,
-  correctionWindowEndsAt: new Date(attendance.createdAt.getTime() + ATTENDANCE_CORRECTION_WINDOW_HOURS * 3_600_000).toISOString(),
+  correctionWindowHours: hours,
+  correctionWindowEndsAt: new Date(attendance.createdAt.getTime() + hours * 3_600_000).toISOString(),
 });
 
 const isUnique = (error: unknown): boolean => typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'P2002';

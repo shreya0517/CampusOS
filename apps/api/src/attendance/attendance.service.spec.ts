@@ -22,6 +22,7 @@ describe('AttendanceService', () => {
     attendanceRecord: { deleteMany: jest.fn(), createMany: jest.fn(), findMany: jest.fn() },
     student: { findFirst: jest.fn() },
     enrollment: { findMany: jest.fn().mockResolvedValue([{ studentId: 'stu-a' }]) },
+    college: { findUnique: jest.fn().mockResolvedValue({ attendanceThreshold: 75, correctionWindowHours: 48, timezone: 'Asia/Kolkata' }) },
     $transaction: jest.fn((fn: (txObj: typeof tx) => Promise<void>) => fn(tx)),
   };
   const service = new AttendanceService(database as never);
@@ -71,7 +72,7 @@ describe('AttendanceService', () => {
     database.attendance.create.mockResolvedValue({ id: 'att-a' });
     attendance.findFirstOrThrow.mockResolvedValue(mockAttendance);
     const result = await service.createAttendance({ classId: 'class-a', heldOn: '2026-09-01', records: [{ studentId: 'stu-a', status: AttendanceStatus.PRESENT }] }, hod);
-    expect(result).toEqual({ ...mockAttendance, correctionWindowEndsAt: expect.any(String) });
+    expect(result).toEqual({ ...mockAttendance, correctionWindowHours: 48, correctionWindowEndsAt: expect.any(String) });
     database.attendance.create.mockRejectedValueOnce({ code: 'P2002' });
     await expect(service.createAttendance({ classId: 'class-a', heldOn: '2026-09-01', records: [{ studentId: 'stu-a', status: AttendanceStatus.PRESENT }] }, hod)).rejects.toBeInstanceOf(ConflictException);
     // Admin decision 2: Admin monitors attendance but does not mark it.
@@ -156,6 +157,23 @@ describe('AttendanceService', () => {
       expect(result.threshold).toBe(75);
       expect(result.overall).toMatchObject({ present: 2, late: 1, absent: 2, excused: 1, attended: 3, counted: 5, percentage: 60, belowThreshold: true });
       expect(result.subjects.map((s) => [s.subject.code, s.percentage, s.belowThreshold])).toEqual([['CS302', 50, true], ['CS301', 66.7, true]]);
+    });
+
+    it("uses the college's own minimum attendance from Settings", async () => {
+      database.college.findUnique.mockResolvedValueOnce({ attendanceThreshold: 60, correctionWindowHours: 48, timezone: 'Asia/Kolkata' });
+      database.student.findFirst.mockResolvedValue({ id: 'stu-a' });
+      database.attendanceRecord.findMany.mockResolvedValue([
+        record('r1', AttendanceStatus.PRESENT, '2026-09-04'),
+        record('r2', AttendanceStatus.LATE, '2026-09-03'),
+        record('r3', AttendanceStatus.ABSENT, '2026-09-02'),
+        record('r5', AttendanceStatus.PRESENT, '2026-09-04', dbms),
+        record('r6', AttendanceStatus.ABSENT, '2026-09-03', dbms),
+      ]);
+      const result = await service.getMyAttendance(query, student);
+      expect(database.college.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'col-a' } }));
+      expect(result.threshold).toBe(60);
+      expect(result.overall).toMatchObject({ percentage: 60, belowThreshold: false });
+      expect(result.subjects.map((s) => [s.subject.code, s.belowThreshold])).toEqual([['CS302', true], ['CS301', false]]);
     });
 
     it('filters history and calendar days by subject and date range but keeps the full summary', async () => {
@@ -243,6 +261,22 @@ describe('AttendanceService', () => {
       await expect(service.updateAttendance('att-a', { records: [{ studentId: 'stu-a', status: AttendanceStatus.ABSENT }] }, admin)).rejects.toBeInstanceOf(ForbiddenException);
     });
 
+    it("closes the window after the college's own number of hours", async () => {
+      database.college.findUnique.mockResolvedValue({ attendanceThreshold: 75, correctionWindowHours: 24, timezone: 'Asia/Kolkata' });
+      try {
+        attendance.findFirst.mockResolvedValue(marked(hoursAgo(30)));
+        const session = await service.getAttendance('att-a', faculty);
+        expect(session.correctionWindowHours).toBe(24);
+        expect(new Date(session.correctionWindowEndsAt).getTime()).toBeLessThan(Date.now());
+        await expect(service.updateAttendance('att-a', { records: [{ studentId: 'stu-a', status: AttendanceStatus.ABSENT }] }, faculty)).rejects.toMatchObject({
+          response: { code: 'CORRECTION_WINDOW_CLOSED', message: expect.stringContaining('within 24 hours') },
+        });
+        expect(tx.attendanceRecord.deleteMany).not.toHaveBeenCalled();
+      } finally {
+        database.college.findUnique.mockResolvedValue({ attendanceThreshold: 75, correctionWindowHours: 48, timezone: 'Asia/Kolkata' });
+      }
+    });
+
     it('returns the history of a session the caller can open, with student names', async () => {
       attendance.findFirst.mockResolvedValue(marked(hoursAgo(2)));
       database.auditLog.findMany.mockResolvedValue([
@@ -269,6 +303,7 @@ describe('AttendanceService My Classes', () => {
     attendance: { count: jest.fn() },
     assignment: { findMany: jest.fn() },
     submission: { groupBy: jest.fn(), count: jest.fn().mockResolvedValue(3) },
+    college: { findUnique: jest.fn().mockResolvedValue({ attendanceThreshold: 75, correctionWindowHours: 48, timezone: 'Asia/Kolkata' }) },
   };
   const service = new AttendanceService(database as never);
   beforeEach(() => jest.clearAllMocks());

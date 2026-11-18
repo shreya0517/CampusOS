@@ -123,6 +123,7 @@ describe('StudentRecordService', () => {
   function createRecordDatabase() {
     return {
       ...createDatabase(),
+      college: { findUnique: jest.fn().mockResolvedValue({ attendanceThreshold: 75, correctionWindowHours: 48, timezone: 'Asia/Kolkata' }) },
       attendanceRecord: {
         findMany: jest.fn().mockResolvedValue([
           { status: 'PRESENT', attendance: { class: { subject: { id: 'sub-db', code: 'CS302', name: 'DBMS' } } } },

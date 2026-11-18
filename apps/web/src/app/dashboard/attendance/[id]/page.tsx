@@ -79,7 +79,8 @@ export default function AttendanceDetailPage() {
     }
   };
 
-  // Faculty can correct a session for 48 hours after marking it; the HOD is not limited by this window. Admin only
+  // Faculty can correct a session for the college's correction window (set in Settings) after marking it; the HOD is
+  // not limited by this window. Admin only
   // reviews attendance (Admin decision 2).
   const windowClosed = primaryRole === 'Faculty' && new Date() > new Date(session.correctionWindowEndsAt);
   const canCorrect = primaryRole !== 'Admin' && !windowClosed;
@@ -111,7 +112,7 @@ export default function AttendanceDetailPage() {
 
       {windowClosed && (
         <p role="status" className="rounded-[var(--radius)] border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-          The 48-hour correction window for this session has closed. Ask your HOD if a record needs to be corrected.
+          The {session.correctionWindowHours}-hour correction window for this session has closed. Ask your HOD if a record needs to be corrected.
         </p>
       )}
 

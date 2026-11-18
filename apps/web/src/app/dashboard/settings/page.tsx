@@ -9,6 +9,7 @@ import { ThemeContext } from '@/components/theme-provider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/form-field';
+import { InstitutionSettingsPanel } from '@/components/settings/institution-settings';
 import { changePassword } from '@/lib/api-client';
 
 const MIN_PASSWORD_LENGTH = 12;
@@ -17,6 +18,10 @@ export default function SettingsPage() {
   const { user, primaryRole, logout } = useAuth();
   const { theme, toggleTheme } = useContext(ThemeContext);
   const router = useRouter();
+  // Institution settings are an ADMIN-only API, so the tab follows that role exactly.
+  const isAdmin = user?.roles?.includes('ADMIN') ?? false;
+  const [tab, setTab] = useState<'account' | 'institution'>('account');
+  const showInstitution = isAdmin && tab === 'institution';
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -52,12 +57,40 @@ export default function SettingsPage() {
 
   return (
     <div className="grid gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">Manage your password, appearance and session.</p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+          <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+            {showInstitution ? 'The college profile and the rules every report and dashboard uses.' : 'Manage your password, appearance and session.'}
+          </p>
+        </div>
+        {isAdmin && (
+          <div className="inline-flex rounded-[var(--radius)] border bg-[hsl(var(--card))] p-1" role="tablist" aria-label="Settings section">
+            {(
+              [
+                ['account', 'My account'],
+                ['institution', 'Institution'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={tab === key}
+                onClick={() => setTab(key)}
+                className={`rounded-md px-4 py-1.5 text-sm font-semibold transition-colors ${tab === key ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]' : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+      {showInstitution && <InstitutionSettingsPanel />}
+
+      {/* Hidden rather than unmounted, so a half-typed password survives switching tabs. */}
+      <div className={`grid gap-6 lg:grid-cols-[2fr_1fr] ${showInstitution ? 'hidden' : ''}`}>
         <Card>
           <CardHeader>
             <CardTitle>Change password</CardTitle>

@@ -3,6 +3,7 @@ import { DatabaseService } from '../database.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
 import { count as add, emptyTally, summarize } from '../attendance/attendance.service';
 import type { Tally } from '../attendance/attendance.service';
+import { collegePolicy } from '../settings/college-policy';
 
 /** Department attendance and the attendance trend cover this many recent days. */
 export const OVERVIEW_WINDOW_DAYS = 30;
@@ -44,8 +45,9 @@ export class InstitutionOverviewService {
   async overview(context: AuthorizationContext) {
     if (!context.roles.includes('ADMIN')) denied();
     const collegeId = context.collegeId;
-    const college = await this.database.college.findUnique({ where: { id: collegeId }, select: { timezone: true } });
-    const today = todayAsStoredDate(college?.timezone);
+    const policy = await collegePolicy(this.database, collegeId);
+    const threshold = policy.attendanceThreshold;
+    const today = todayAsStoredDate(policy.timezone);
     const since = new Date(today.getTime() - (OVERVIEW_WINDOW_DAYS - 1) * 86_400_000);
 
     const [
@@ -156,7 +158,7 @@ export class InstitutionOverviewService {
       generatedAt: new Date().toISOString(),
       windowDays: OVERVIEW_WINDOW_DAYS,
       totals: { students, faculty: faculty.length, departments: departments.length },
-      attendance: { today: summarize(todayTally), window: summarize(windowTally) },
+      attendance: { today: summarize(todayTally, threshold), window: summarize(windowTally, threshold) },
       tasks,
       pendingVisitors,
       upcomingExams,
@@ -168,7 +170,7 @@ export class InstitutionOverviewService {
           hod: hod ? { id: hod.id, name: fullName(hod), employeeCode: hod.employeeCode } : null,
           faculty: facultyCount.get(department.id) ?? 0,
           students: studentsByDepartment.get(department.id)?.size ?? 0,
-          attendance: summarize(attendanceByDepartment.get(department.id) ?? emptyTally()),
+          attendance: summarize(attendanceByDepartment.get(department.id) ?? emptyTally(), threshold),
           openTasks: openTasksByDepartment.get(department.id) ?? 0,
         };
       }),

@@ -1,7 +1,8 @@
 import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
-import { ATTENDANCE_THRESHOLD_PERCENT, count, emptyTally, summarize } from '../attendance/attendance.service';
+import { count, emptyTally, summarize } from '../attendance/attendance.service';
+import { collegePolicy } from '../settings/college-policy';
 import type { Tally } from '../attendance/attendance.service';
 import { StudentsService } from './students.service';
 
@@ -37,7 +38,7 @@ export class StudentRecordService {
     if (!isAdmin && !hodDepartment) denied();
     const inDepartment = hodDepartment ? { semester: { course: { departmentId: hodDepartment } } } : {};
 
-    const [attendanceRecords, assignments, results, invoices] = await Promise.all([
+    const [attendanceRecords, assignments, results, invoices, policy] = await Promise.all([
       this.database.attendanceRecord.findMany({
         where: { collegeId, studentId: id, ...(hodDepartment ? { attendance: { class: { section: inDepartment } } } : {}) },
         select: { status: true, attendance: { select: { class: { select: { subject: { select: { id: true, code: true, name: true } } } } } } },
@@ -76,7 +77,9 @@ export class StudentRecordService {
             orderBy: { createdAt: 'desc' },
           })
         : Promise.resolve(null),
+      collegePolicy(this.database, collegeId),
     ]);
+    const threshold = policy.attendanceThreshold;
 
     // Attendance overall and by subject, with the same rules as the student's own attendance page.
     const overall = emptyTally();
@@ -133,9 +136,9 @@ export class StudentRecordService {
     return {
       student,
       attendance: {
-        threshold: ATTENDANCE_THRESHOLD_PERCENT,
-        overall: summarize(overall),
-        subjects: [...bySubject.values()].map(({ subject, tally }) => ({ subject, ...summarize(tally) })).sort((a, b) => a.subject.name.localeCompare(b.subject.name)),
+        threshold,
+        overall: summarize(overall, threshold),
+        subjects: [...bySubject.values()].map(({ subject, tally }) => ({ subject, ...summarize(tally, threshold) })).sort((a, b) => a.subject.name.localeCompare(b.subject.name)),
       },
       coursework: {
         assigned: coursework.length,

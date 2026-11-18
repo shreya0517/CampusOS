@@ -119,7 +119,7 @@ describe('InstitutionOverviewService', () => {
     expect(report.upcomingExams).toBe(1);
     expect(report.fees).toEqual({ collected: 15000, outstanding: 70000, openInvoices: 2, overdueInvoices: 1 });
     // Every query stays inside the admin's college.
-    expect(database.college.findUnique).toHaveBeenCalledWith({ where: { id: 'col-a' }, select: { timezone: true } });
+    expect(database.college.findUnique).toHaveBeenCalledWith({ where: { id: 'col-a' }, select: { attendanceThreshold: true, correctionWindowHours: true, timezone: true } });
     const { college: _college, ...tenantModels } = database;
     for (const model of Object.values(tenantModels)) {
       for (const fn of Object.values(model)) {
