@@ -26,6 +26,13 @@ const tooMany = (retryAfterMs: number, what: string): never => {
   );
 };
 
+/**
+ * A refresh token presented again after its session moved on is a replay: someone else may hold it. Within this many
+ * milliseconds of the rotation it is treated as another tab refreshing at the same moment and only refused; after
+ * that the session is revoked.
+ */
+export const REFRESH_REUSE_GRACE_MS = 30_000;
+
 export type PublicUser = { id: string; collegeId: string; email: string; displayName: string; emailVerified: boolean; roles: string[] };
 type SessionResult = { accessToken: string; refreshToken: string; user: PublicUser };
 
@@ -85,18 +92,44 @@ export class AuthService {
 
   async refresh(rawToken: string | undefined): Promise<SessionResult> {
     if (!rawToken) throw new UnauthorizedException({ code: 'SESSION_EXPIRED', message: 'Session expired.' });
+    const presented = hashToken(rawToken);
     const session = await this.database.authSession.findUnique({
-      where: { refreshTokenHash: hashToken(rawToken) },
+      where: { refreshTokenHash: presented },
       include: { user: { include: { userRoles: { include: { role: true } }, studentProfiles: true, facultyProfiles: true } } },
     });
-    if (!session || session.revokedAt || session.expiresAt <= new Date() || session.user.status !== 'ACTIVE' || !session.user.emailVerifiedAt) throw new UnauthorizedException({ code: 'SESSION_EXPIRED', message: 'Session expired.' });
+    if (!session) {
+      await this.revokeOnReuse(presented);
+      throw new UnauthorizedException({ code: 'SESSION_EXPIRED', message: 'Session expired.' });
+    }
+    if (session.revokedAt || session.expiresAt <= new Date() || session.user.status !== 'ACTIVE' || !session.user.emailVerifiedAt) throw new UnauthorizedException({ code: 'SESSION_EXPIRED', message: 'Session expired.' });
     const refreshToken = randomToken();
     const rotation = await this.database.authSession.updateMany({
-      where: { id: session.id, refreshTokenHash: hashToken(rawToken), revokedAt: null },
-      data: { refreshTokenHash: hashToken(refreshToken) },
+      where: { id: session.id, refreshTokenHash: presented, revokedAt: null },
+      // The old token is kept as the previous one, so presenting it again later is recognised as a reuse.
+      data: { refreshTokenHash: hashToken(refreshToken), previousRefreshTokenHash: presented, rotatedAt: new Date() },
     });
     if (rotation.count !== 1) throw new UnauthorizedException({ code: 'SESSION_EXPIRED', message: 'Session expired.' });
     return { accessToken: this.createAccessToken(session.user.id, session.user.collegeId, session.id), refreshToken, user: toPublicUser(session.user) };
+  }
+
+  /**
+   * A token that was already rotated away is being presented again. Unless that happened moments ago (another tab
+   * refreshing at the same time), it may have been stolen, so the whole session is revoked: both the thief and the
+   * owner have to sign in again.
+   */
+  private async revokeOnReuse(presentedHash: string): Promise<void> {
+    const rotated = await this.database.authSession.findUnique({ where: { previousRefreshTokenHash: presentedHash }, select: { id: true, rotatedAt: true, revokedAt: true } });
+    if (!rotated || rotated.revokedAt) return;
+    if (rotated.rotatedAt && Date.now() - rotated.rotatedAt.getTime() <= REFRESH_REUSE_GRACE_MS) return;
+    await this.database.authSession.updateMany({ where: { id: rotated.id, revokedAt: null }, data: { revokedAt: new Date() } });
+  }
+
+  /**
+   * Checks a signed-in session is still valid (not revoked or expired, user active and verified) without an access
+   * token, for long-lived connections such as sockets that outlive the token they connected with.
+   */
+  async authorizeSession(sessionId: string, userId: string, collegeId: string): Promise<PublicUser> {
+    return this.authorizeAccessPayload({ sub: userId, collegeId, sid: sessionId, exp: 0 });
   }
 
   async logout(rawToken: string | undefined): Promise<void> {

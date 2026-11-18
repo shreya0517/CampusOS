@@ -28,6 +28,12 @@ All room joins occur server-side inside `EventsGateway.joinAuthorizedRooms()` up
 
 Clients cannot request or leave rooms arbitrarily. The Socket.IO gateway handles all room assignments based on the server-resolved `AuthorizationContext`.
 
+Every 60 seconds the gateway re-checks each connected socket against its session:
+- A socket whose session has ended (logout, password change or reset, deactivation, expiry) receives `auth:error` and is disconnected.
+- A socket whose roles or department changed leaves its rooms and joins the ones it is allowed now.
+- A database error during the check leaves the socket as it is.
+- The check uses the session, not the access token, so a socket isn't dropped just because the token it connected with has expired.
+
 ---
 
 ## 3. Handshake & Authentication Flow

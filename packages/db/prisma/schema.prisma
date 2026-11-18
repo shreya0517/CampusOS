@@ -243,16 +243,20 @@ model User {
 }
 
 model AuthSession {
-  id               String    @id @default(cuid())
-  collegeId        String
-  userId           String
-  refreshTokenHash String    @unique
-  expiresAt        DateTime
-  revokedAt        DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  college          College   @relation(fields: [collegeId], references: [id], onDelete: Cascade)
-  user             User      @relation(fields: [collegeId, userId], references: [collegeId, id], onDelete: Cascade)
+  id                       String    @id @default(cuid())
+  collegeId                String
+  userId                   String
+  refreshTokenHash         String    @unique
+  /// The token this session had before its last refresh. Seeing it again means a refresh token was reused.
+  previousRefreshTokenHash String?   @unique
+  /// When the session was last refreshed; a reuse within a few seconds of it is a parallel refresh from another tab.
+  rotatedAt                DateTime?
+  expiresAt                DateTime
+  revokedAt                DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  college                  College   @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  user                     User      @relation(fields: [collegeId, userId], references: [collegeId, id], onDelete: Cascade)
 
   @@unique([collegeId, id])
   @@index([collegeId, userId, expiresAt])

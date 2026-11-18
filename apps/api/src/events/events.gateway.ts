@@ -1,4 +1,5 @@
-import { Inject, Logger } from '@nestjs/common';
+import { Inject, Logger, UnauthorizedException } from '@nestjs/common';
+import type { OnModuleDestroy } from '@nestjs/common';
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import type {
   OnGatewayConnection,
@@ -25,6 +26,13 @@ type SocketMeta = {
 
 const SOCKET_META = Symbol('socket-meta');
 
+/** How often connected sockets are checked against their session, roles and department. */
+export const SOCKET_RECHECK_INTERVAL_MS = 60_000;
+
+/** Whether two contexts put a socket in the same rooms. */
+const sameRooms = (a: AuthorizationContext, b: AuthorizationContext): boolean =>
+  a.collegeId === b.collegeId && a.departmentId === b.departmentId && [...a.roles].sort().join() === [...b.roles].sort().join();
+
 /**
  * Central WebSocket gateway for CampusOS.
  *
@@ -43,8 +51,10 @@ const SOCKET_META = Symbol('socket-meta');
   // Path: default /socket.io
   transports: ['websocket', 'polling'],
 })
-export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
+export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
   private readonly logger = new Logger(EventsGateway.name);
+  private recheckTimer: NodeJS.Timeout | null = null;
+  private rechecking = false;
 
   @WebSocketServer()
   private server!: Server;
@@ -60,6 +70,53 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   afterInit(server: Server): void {
     this.events.setServer(server);
     this.logger.log('WebSocket gateway initialised.');
+    // Sockets are only checked when they connect, so sessions that end and roles that change are re-checked here.
+    if (process.env.NODE_ENV !== 'test') {
+      this.recheckTimer = setInterval(() => void this.recheckAll(), SOCKET_RECHECK_INTERVAL_MS);
+      this.recheckTimer.unref();
+    }
+  }
+
+  onModuleDestroy(): void {
+    if (this.recheckTimer) clearInterval(this.recheckTimer);
+  }
+
+  /** Re-checks every connected socket; a run that is still going is not overlapped. */
+  async recheckAll(): Promise<void> {
+    if (this.rechecking || !this.server) return;
+    this.rechecking = true;
+    try {
+      for (const client of [...this.server.sockets.sockets.values()]) await this.recheck(client);
+    } finally {
+      this.rechecking = false;
+    }
+  }
+
+  /**
+   * Disconnects a socket whose session ended (logout, password change or reset, deactivation, expiry), and moves one
+   * whose roles or department changed to the rooms it is allowed now. A database error leaves the socket as it is.
+   */
+  async recheck(client: Socket): Promise<void> {
+    const meta = this.getMeta(client);
+    if (!meta) return;
+    try {
+      const user = await this.auth.authorizeSession(meta.sessionId, meta.userId, meta.collegeId);
+      const authorization = await this.authorization.getContext(user);
+      if (sameRooms(meta.authorization, authorization)) return;
+      for (const room of [...client.rooms]) if (room !== client.id) client.leave(room);
+      const next = { ...meta, authorization };
+      this.setMeta(client, next);
+      this.joinAuthorizedRooms(client, next);
+      this.logger.log(`Socket rooms updated after a role or department change: user=${meta.userId} sid=${client.id}`);
+    } catch (error) {
+      if (!(error instanceof UnauthorizedException)) {
+        this.logger.warn(`Socket re-check failed (${client.id}): ${error instanceof Error ? error.message : 'unknown'}`);
+        return;
+      }
+      client.emit('auth:error', { message: 'Your session has ended.' });
+      client.disconnect(true);
+      this.logger.log(`Socket disconnected because its session ended: user=${meta.userId} sid=${client.id}`);
+    }
   }
 
   async handleConnection(client: Socket): Promise<void> {
