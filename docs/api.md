@@ -110,9 +110,19 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 
 ## Announcements
 
-- GET /api/v1/announcements: any signed-in user. Returns published, unexpired announcements in the caller's college, newest first, with the author's id and display name. Query: search? (title or body), page (default 1), pageSize (default 10, max 50).
+- GET /api/v1/announcements: any signed-in user. Returns published, unexpired announcements in the caller's college that are meant for them, newest first. Each comes with its author (id and display name) and its target (department code and name, semester number, section code).
+  - Query: search? (title or body), category?, page (default 1), pageSize (default 10, max 50).
   - Audience rules: STUDENT sees ALL and STUDENTS; FACULTY and HOD see ALL, FACULTY and STAFF; ADMIN sees every audience.
-- POST /api/v1/announcements: ADMIN only. Body: { title (3-160 chars), body (1-5000 chars), audience? (ALL, STUDENTS, FACULTY or STAFF; default ALL), publishedAt?, expiresAt? }. The college and author come from the access token. publishedAt defaults to now; expiresAt must be after it.
+  - Target rules, within the audience. An announcement with no target is for the whole college. A targeted one is seen by:
+    - students actively enrolled in a section it covers;
+    - faculty who teach a class in such a section, plus every faculty member of the department when it targets a whole department;
+    - the HOD of its department, and every HOD when it targets a semester with no department.
+  - ADMIN sees every announcement.
+- POST /api/v1/announcements: ADMIN only (HOD decision 5 and Faculty decision 5: both view only). The college and author come from the access token.
+  - Body: { title (3-160 chars), body (1-5000 chars), audience? (ALL, STUDENTS, FACULTY or STAFF; default ALL), category? (GENERAL, ACADEMIC, EXAMINATION, HOLIDAY, EVENT or DEADLINE; default GENERAL), departmentId?, semesterNumber? (1-12), sectionId?, publishedAt?, expiresAt? }.
+  - A section target also sets its department and semester; a department or semester given with it must match (400 TARGET_MISMATCH). An unknown section or department returns 404.
+  - publishedAt defaults to now. A later publishedAt schedules the announcement. expiresAt must be after both the publishing time and now.
+- Delivery: everyone the announcement is for gets a notification once, either when it is published or, if it was scheduled, by a check that runs every minute. `notifiedAt` records the delivery. Each delivery is claimed with a conditional update first, so it happens once even with several API instances. An announcement that expires before its time comes is not announced.
 
 ## Attendance and Marks Entry
 
@@ -232,7 +242,7 @@ Raised today:
 | Results published | Students with a result |
 | Assignment submitted (not a draft) | The faculty member teaching the class |
 | Assignment graded or returned | The student |
-| Announcement published now | Everyone in its audience (scheduled ones are not announced: there is no scheduler yet) |
+| Announcement published, or a scheduled one whose time comes | Everyone it is for (its audience, within its target) |
 
 The actor is never notified about their own action. Finding the recipients and storing notifications never fails or undoes the action that raised them; errors are logged.
 
