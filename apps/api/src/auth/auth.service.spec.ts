@@ -106,6 +106,19 @@ describe('AuthService', () => {
     expect(database.user.create).not.toHaveBeenCalled();
   });
 
+  it('reports roles only from role assignments, never guessed from a profile', async () => {
+    const database = createDatabase();
+    const passwordHash = await hashPassword('a-strong-password');
+    database.college.findUnique.mockResolvedValue({ id: 'college-1' });
+    database.authSession.create.mockResolvedValue(activeSession);
+    const service = new AuthService(database as never);
+    // A student profile but no role row: the API refuses this account everywhere, so the app must not show a role.
+    database.user.findUnique.mockResolvedValue({ ...activeUser, passwordHash, userRoles: [], studentProfiles: [{ id: 'stu-1' }] });
+    await expect(service.login({ collegeCode: 'DEMO', email: activeUser.email, password: 'a-strong-password' })).resolves.toMatchObject({ user: { roles: [] } });
+    database.user.findUnique.mockResolvedValue({ ...activeUser, passwordHash, userRoles: [{ role: { name: 'STUDENT' } }] });
+    await expect(service.login({ collegeCode: 'DEMO', email: activeUser.email, password: 'a-strong-password' })).resolves.toMatchObject({ user: { roles: ['STUDENT'] } });
+  });
+
   it('creates a session for valid verified credentials and rejects invalid or unverified credentials', async () => {
     const database = createDatabase();
     const passwordHash = await hashPassword('a-strong-password');

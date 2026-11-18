@@ -89,6 +89,26 @@ export function AppShell({ children }: { children: ReactNode }) {
     return null;
   }
 
+  // An account without a role gets nothing from the API (403 NO_ROLE), so say so instead of showing a menu that fails.
+  if (!user.roles?.length) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-[hsl(var(--background))] p-6">
+        <div className="grid max-w-md gap-3 rounded-[var(--radius)] border bg-[hsl(var(--card))] p-6 text-center shadow-sm">
+          <h1 className="text-lg font-semibold">Your account has no role yet</h1>
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">
+            You're signed in as {user.email}, but your college hasn't given this account a role, so there is nothing to show. Ask your college
+            administrator to set it up.
+          </p>
+          <div>
+            <button type="button" onClick={() => void handleLogout()} className="rounded-[var(--radius)] border px-4 py-2 text-sm font-semibold">
+              Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const canonicalRole = resolveCanonicalRole(user.roles, primaryRole);
   const visibleNavigation = ROLE_NAVIGATION[canonicalRole] ?? ROLE_NAVIGATION.STUDENT;
   const defaultRoute = getDefaultDashboardRoute(canonicalRole);
