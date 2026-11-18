@@ -1,8 +1,7 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { randomBytes } from 'node:crypto';
 import type { UserStatus } from '@prisma/client';
 import { DatabaseService } from '../database.service';
-import { hashPassword } from '../auth/auth.service';
+import { accountConflict, createAccountWithRole, generateTemporaryPassword } from '../auth/accounts';
 import type { AuthorizationContext } from '../authorization/authorization.types';
 import type { FacultyAccountDto, FacultyAccountStatusDto, FacultyDto, FacultyUpdateDto } from './faculty.dto';
 
@@ -14,8 +13,6 @@ const missing = (): never => {
 };
 const isUniqueViolation = (error: unknown): boolean => (error as { code?: string }).code === 'P2002';
 
-/** A random temporary password, shown to the Admin once; the faculty member changes it in Settings. */
-export const generateTemporaryPassword = (): string => randomBytes(12).toString('base64url');
 
 const userSelect = { select: { email: true, status: true, userRoles: { select: { role: { select: { name: true } } } } } } as const;
 const facultyInclude = { department: true, user: userSelect, _count: { select: { classes: true } } } as const;
@@ -72,7 +69,9 @@ export class FacultyService {
     const temporaryPassword = input.email ? generateTemporaryPassword() : undefined;
     try {
       const faculty = await this.database.$transaction(async (tx) => {
-        const userId = input.email ? await this.createFacultyUser(tx, input.email, `${input.firstName} ${input.lastName}`, temporaryPassword as string, c) : null;
+        const userId = input.email
+          ? await createAccountWithRole(tx, { collegeId: c.collegeId, email: input.email, displayName: `${input.firstName} ${input.lastName}`, roleName: 'FACULTY', temporaryPassword: temporaryPassword as string })
+          : null;
         const created = await tx.faculty.create({
           data: { collegeId: c.collegeId, employeeCode: input.employeeCode, firstName: input.firstName, lastName: input.lastName, designation: input.designation ?? null, departmentId, userId },
           include: facultyInclude,
@@ -82,7 +81,7 @@ export class FacultyService {
       });
       return { ...this.present(faculty, c), ...(temporaryPassword ? { temporaryPassword } : {}) };
     } catch (error) {
-      if (isUniqueViolation(error)) throw this.duplicate(error);
+      if (isUniqueViolation(error)) throw accountConflict(error, { code: 'FACULTY_EXISTS', message: 'Employee code already exists.' });
       throw error;
     }
   }
@@ -96,14 +95,14 @@ export class FacultyService {
     const temporaryPassword = generateTemporaryPassword();
     try {
       await this.database.$transaction(async (tx) => {
-        const userId = await this.createFacultyUser(tx, input.email, `${faculty!.firstName} ${faculty!.lastName}`, temporaryPassword, c);
+        const userId = await createAccountWithRole(tx, { collegeId: c.collegeId, email: input.email, displayName: `${faculty!.firstName} ${faculty!.lastName}`, roleName: 'FACULTY', temporaryPassword });
         // Only links if the record still has no account, so two concurrent requests can't both attach one.
         const linked = await tx.faculty.updateMany({ where: { id, collegeId: c.collegeId, userId: null }, data: { userId } });
         if (linked.count !== 1) throw new ConflictException({ code: 'ACCOUNT_EXISTS', message: 'This faculty member already has a sign-in account.' });
         await tx.auditLog.create({ data: { collegeId: c.collegeId, actorId: c.userId, action: 'FACULTY_ACCOUNT_CREATED', entityType: 'Faculty', entityId: id } });
       });
     } catch (error) {
-      if (isUniqueViolation(error)) throw this.duplicate(error);
+      if (isUniqueViolation(error)) throw accountConflict(error, { code: 'FACULTY_EXISTS', message: 'Employee code already exists.' });
       throw error;
     }
     return { ...(await this.get(id, c)), temporaryPassword };
@@ -190,30 +189,5 @@ export class FacultyService {
       throw error;
     }
     return this.get(id, c);
-  }
-
-  private async createFacultyUser(
-    tx: Pick<DatabaseService, 'user' | 'role' | 'userRole'>,
-    email: string,
-    displayName: string,
-    temporaryPassword: string,
-    c: AuthorizationContext,
-  ): Promise<string> {
-    // The Admin vouches for the address, so it is marked verified; the person signs in with the temporary password.
-    const user = await tx.user.create({
-      data: { collegeId: c.collegeId, email, displayName, passwordHash: await hashPassword(temporaryPassword), emailVerifiedAt: new Date(), status: 'ACTIVE' },
-      select: { id: true },
-    });
-    const role = await tx.role.upsert({ where: { collegeId_name: { collegeId: c.collegeId, name: 'FACULTY' } }, update: {}, create: { collegeId: c.collegeId, name: 'FACULTY' } });
-    await tx.userRole.create({ data: { collegeId: c.collegeId, userId: user.id, roleId: role.id } });
-    return user.id;
-  }
-
-  private duplicate(error: unknown): ConflictException {
-    const target = (error as { meta?: { target?: unknown } }).meta?.target;
-    const fields = Array.isArray(target) ? target.join(',') : String(target ?? '');
-    return fields.includes('email')
-      ? new ConflictException({ code: 'ACCOUNT_EXISTS', message: 'An account already exists for this email.' })
-      : new ConflictException({ code: 'FACULTY_EXISTS', message: 'Employee code already exists.' });
   }
 }
