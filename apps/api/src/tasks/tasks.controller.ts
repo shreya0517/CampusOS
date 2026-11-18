@@ -26,23 +26,28 @@ export class TasksController {
     return this.service.createTask(input, context);
   }
 
+  // Tasks are staff work: a student has none, so these reads are refused rather than answered with an empty list.
   @Get()
+  @RequireRoles('ADMIN', 'HOD', 'FACULTY')
   async listTasks(@Query() query: unknown, @CurrentAuthorization() context: AuthorizationContext) {
     const parsed = parseTaskListQuery(query);
     return this.service.listTasks(parsed, context);
   }
 
   @Get('my')
+  @RequireRoles('ADMIN', 'HOD', 'FACULTY')
   async listMyAssignments(@CurrentAuthorization() context: AuthorizationContext) {
     return this.service.listMyAssignments(context);
   }
 
   @Get('my/stats')
+  @RequireRoles('ADMIN', 'HOD', 'FACULTY')
   async getMyAssignmentStats(@CurrentAuthorization() context: AuthorizationContext) {
     return this.service.getMyAssignmentStats(context);
   }
 
   @Get(':id')
+  @RequireRoles('ADMIN', 'HOD', 'FACULTY')
   async getTask(@Param('id') id: string, @CurrentAuthorization() context: AuthorizationContext) {
     return this.service.getTask(id, context);
   }

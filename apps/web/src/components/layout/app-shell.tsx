@@ -25,8 +25,13 @@ const ROLE_LABEL: Record<CanonicalRole, string> = {
   STUDENT: 'Student',
 };
 
+/** Honorifics are not part of someone's name, so "Dr. Priya Sharma" is PS, not DS. */
+const TITLES = new Set(['dr', 'prof', 'mr', 'mrs', 'ms', 'miss', 'sir', 'shri', 'smt']);
+
 function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const named = words.filter((word) => !TITLES.has(word.replace(/\./g, '').toLowerCase()));
+  const parts = named.length > 0 ? named : words;
   const first = parts[0] ?? '?';
   const last = parts.length > 1 ? (parts[parts.length - 1] ?? '') : '';
   return (last ? `${first.charAt(0)}${last.charAt(0)}` : first.slice(0, 2)).toUpperCase();

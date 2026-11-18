@@ -6,6 +6,7 @@ import { useAuth } from '@/components/auth-provider';
 import { EmptyState, ErrorState, Skeleton } from '@/components/feedback/states';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog } from '@/components/ui/interactive';
 import {
   deleteTimetableEntry,
   getRooms,
@@ -50,6 +51,9 @@ export default function TimetablePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Removing a slot asks in the app's own dialog, and a failure is shown there, not in a browser pop-up.
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -82,13 +86,14 @@ export default function TimetablePage() {
   }, [activeTab, dayFilter, roomFilter]);
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to remove this timetable entry?')) return;
     setDeletingId(id);
+    setDeleteError(null);
     try {
       await deleteTimetableEntry(id);
       setEntries((prev) => prev.filter((e) => e.id !== id));
+      setConfirmingId(null);
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to delete timetable entry.');
+      setDeleteError(e instanceof Error ? e.message : 'Failed to delete timetable entry.');
     } finally {
       setDeletingId(null);
     }
@@ -274,7 +279,7 @@ export default function TimetablePage() {
                                 <Button
                                   variant="ghost"
                                   disabled={deletingId === entry.id}
-                                  onClick={() => void handleDelete(entry.id)}
+                                  onClick={() => { setDeleteError(null); setConfirmingId(entry.id); }}
                                   className="h-7 px-2 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/30"
                                 >
                                   {deletingId === entry.id ? 'Deleting...' : 'Delete'}
@@ -292,6 +297,27 @@ export default function TimetablePage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog
+        open={confirmingId !== null}
+        title="Remove this class session?"
+        description="The session is taken off the timetable for its section, teacher and room."
+        onClose={() => setConfirmingId(null)}
+      >
+        {deleteError && (
+          <p role="alert" className="mb-3 text-sm text-[hsl(var(--destructive))]">
+            {deleteError}
+          </p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setConfirmingId(null)}>
+            Cancel
+          </Button>
+          <Button variant="destructive" loading={deletingId !== null} onClick={() => confirmingId && void handleDelete(confirmingId)}>
+            Remove session
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }
