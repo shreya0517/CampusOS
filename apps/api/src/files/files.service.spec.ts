@@ -91,6 +91,30 @@ describe('FilesService', () => {
     expect(storage.deleteObject).toHaveBeenCalledWith(mockFile.storageKey);
   });
 
+  it("lists someone else's private files to no one but an Admin, and the uploader's email only to an Admin", async () => {
+    database.file.findMany.mockResolvedValue([]);
+    database.file.count.mockResolvedValue(0);
+    const faculty = { ...otherUser, userId: 'fac-user', roles: ['FACULTY'] } as typeof otherUser;
+    await service.listFiles({ page: 1, pageSize: 20 }, faculty);
+    expect(database.file.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ OR: [{ uploadedById: 'fac-user' }, { visibility: 'COLLEGE' }, { visibility: 'PUBLIC' }] }),
+        include: { uploadedBy: { select: { id: true, displayName: true } } },
+      }),
+    );
+    await service.listFiles({ page: 1, pageSize: 20 }, admin);
+    const adminCall = database.file.findMany.mock.calls.at(-1)?.[0] as { where: Record<string, unknown>; include: unknown };
+    expect(adminCall.where).not.toHaveProperty('OR');
+    expect(adminCall.include).toEqual({ uploadedBy: { select: { id: true, displayName: true, email: true } } });
+  });
+
+  it('keeps the record when the stored object could not be deleted', async () => {
+    database.file.findFirst.mockResolvedValue(mockFile);
+    storage.deleteObject.mockRejectedValueOnce(new Error('AccessDenied'));
+    await expect(service.deleteFile('file-1', admin)).rejects.toMatchObject({ response: { code: 'FILE_DELETE_FAILED' } });
+    expect(database.file.delete).not.toHaveBeenCalled();
+  });
+
   it('blocks non-owner non-admin from deleting file', async () => {
     database.file.findFirst.mockResolvedValue(mockFile);
 

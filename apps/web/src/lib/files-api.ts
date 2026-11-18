@@ -2,7 +2,8 @@ import { authenticatedRequest } from './api-client';
 
 export type FileVisibility = 'PRIVATE' | 'COLLEGE' | 'PUBLIC';
 
-export type FileUser = { id: string; displayName: string; email: string };
+/** The uploader; `email` is sent to Admins only. */
+export type FileUser = { id: string; displayName: string; email?: string };
 
 export type FileItem = {
   id: string;
