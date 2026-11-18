@@ -1,4 +1,4 @@
-import { ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { FileVisibility } from '@prisma/client';
 import { DatabaseService } from '../database.service';
 import { StorageService } from './storage.service';
@@ -15,6 +15,9 @@ const missing = (): never => {
 const sanitizeFileName = (filename: string): string => {
   return filename.replace(/[^a-zA-Z0-9_.-]/g, '_').toLowerCase();
 };
+
+/** Uploader details: the email only for an Admin; others see the name. */
+const uploaderSelect = (withEmail: boolean) => ({ id: true, displayName: true, ...(withEmail ? { email: true } : {}) });
 
 @Injectable()
 export class FilesService {
@@ -57,8 +60,12 @@ export class FilesService {
     };
   }
 
+  /**
+   * The same rule as opening a file: an Admin sees every file; everyone else sees their own files and those shared
+   * with the college (COLLEGE or PUBLIC). Someone else's PRIVATE file isn't listed, not even its name.
+   */
   async listFiles(query: FileListQuery, context: AuthorizationContext) {
-    const isManager = context.roles.includes('ADMIN') || context.roles.includes('HOD') || context.roles.includes('FACULTY');
+    const isAdmin = context.roles.includes('ADMIN');
 
     const baseWhere: Record<string, unknown> = {
       collegeId: context.collegeId,
@@ -72,8 +79,7 @@ export class FilesService {
       baseWhere.originalName = { contains: query.search, mode: 'insensitive' };
     }
 
-    if (!isManager) {
-      // Students see files uploaded by themselves OR with COLLEGE or PUBLIC visibility
+    if (!isAdmin) {
       baseWhere.OR = [
         { uploadedById: context.userId },
         { visibility: FileVisibility.COLLEGE },
@@ -85,7 +91,7 @@ export class FilesService {
       this.database.file.findMany({
         where: baseWhere,
         include: {
-          uploadedBy: { select: { id: true, displayName: true, email: true } },
+          uploadedBy: { select: uploaderSelect(isAdmin) },
         },
         orderBy: [{ createdAt: 'desc' }],
         skip: (query.page - 1) * query.pageSize,
@@ -101,7 +107,7 @@ export class FilesService {
     const fileRecord = await this.database.file.findFirst({
       where: { id, collegeId: context.collegeId },
       include: {
-        uploadedBy: { select: { id: true, displayName: true, email: true } },
+        uploadedBy: { select: uploaderSelect(context.roles.includes('ADMIN')) },
       },
     });
 
@@ -138,10 +144,13 @@ export class FilesService {
       denied();
     }
 
+    // The record is removed only once the stored object is gone (a missing object counts as gone). If storage fails,
+    // the record stays, so the file isn't left in the bucket with nothing pointing at it; deleting again retries.
     try {
       await this.storage.deleteObject(fileRecord.storageKey);
     } catch (error) {
-      this.logger.warn(`S3 DeleteObject warning for key ${fileRecord.storageKey}: ${error}`);
+      this.logger.error(`Could not delete stored object ${fileRecord.storageKey}: ${error instanceof Error ? error.message : String(error)}`);
+      throw new ServiceUnavailableException({ code: 'FILE_DELETE_FAILED', message: 'The file could not be deleted from storage. Please try again.' });
     }
 
     await this.database.file.delete({

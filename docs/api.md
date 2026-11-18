@@ -264,6 +264,12 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
   - Summaries follow the student attendance rules: late counts as attended and excused sessions are left out.
 - Admin decision 2: POST /api/v1/attendance and PUT /api/v1/attendance/:id are HOD and FACULTY only. Admin reads sessions, history and the report but doesn't mark or correct. Faculty correct within the college's correction window; the HOD corrects after that.
 
+## Files
+
+- GET /api/v1/files and GET /api/v1/files/:id follow one rule: an ADMIN sees every file in the college; everyone else sees their own files and files shared with the college (COLLEGE or PUBLIC visibility). Someone else's PRIVATE file isn't listed, and opening it returns 403.
+- The uploader's email is included only for an ADMIN; others get the uploader's id and name.
+- DELETE /api/v1/files/:id (the owner or an ADMIN) removes the record only once the stored object is deleted (an object that is already missing counts as deleted). If storage fails, it returns 503 FILE_DELETE_FAILED and keeps the record, so deleting again retries instead of leaving an orphaned object.
+
 ## Notifications
 
 Every signed-in user (SUPER_ADMIN, ADMIN, HOD, FACULTY, STUDENT) reads and marks only their own notifications; the user always comes from the session.
