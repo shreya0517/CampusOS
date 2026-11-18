@@ -70,10 +70,12 @@ describe('AttendanceService', () => {
     database.class.findFirst.mockResolvedValue(mockClass);
     database.attendance.create.mockResolvedValue({ id: 'att-a' });
     attendance.findFirstOrThrow.mockResolvedValue(mockAttendance);
-    const result = await service.createAttendance({ classId: 'class-a', heldOn: '2026-09-01', records: [{ studentId: 'stu-a', status: AttendanceStatus.PRESENT }] }, admin);
+    const result = await service.createAttendance({ classId: 'class-a', heldOn: '2026-09-01', records: [{ studentId: 'stu-a', status: AttendanceStatus.PRESENT }] }, hod);
     expect(result).toEqual({ ...mockAttendance, correctionWindowEndsAt: expect.any(String) });
     database.attendance.create.mockRejectedValueOnce({ code: 'P2002' });
-    await expect(service.createAttendance({ classId: 'class-a', heldOn: '2026-09-01', records: [{ studentId: 'stu-a', status: AttendanceStatus.PRESENT }] }, admin)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.createAttendance({ classId: 'class-a', heldOn: '2026-09-01', records: [{ studentId: 'stu-a', status: AttendanceStatus.PRESENT }] }, hod)).rejects.toBeInstanceOf(ConflictException);
+    // Admin decision 2: Admin monitors attendance but does not mark it.
+    await expect(service.createAttendance({ classId: 'class-a', heldOn: '2026-09-02', records: [{ studentId: 'stu-a', status: AttendanceStatus.PRESENT }] }, admin)).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('returns 404 for missing attendance session', async () => {
@@ -84,7 +86,7 @@ describe('AttendanceService', () => {
   it('updates attendance by replacing all records in a transaction', async () => {
     database.attendance.findFirst.mockResolvedValue(mockAttendance);
     database.attendance.findFirst.mockResolvedValue(mockAttendance);
-    await service.updateAttendance('att-a', { records: [{ studentId: 'stu-a', status: AttendanceStatus.ABSENT }] }, admin);
+    await service.updateAttendance('att-a', { records: [{ studentId: 'stu-a', status: AttendanceStatus.ABSENT }] }, hod);
     expect(tx.attendanceRecord.deleteMany).toHaveBeenCalledWith({ where: { collegeId: 'col-a', attendanceId: 'att-a' } });
     expect(tx.attendanceRecord.createMany).toHaveBeenCalled();
   });
@@ -101,7 +103,7 @@ describe('AttendanceService', () => {
   it('checks enrollment on updates too', async () => {
     database.attendance.findFirst.mockResolvedValue(mockAttendance);
     database.enrollment.findMany.mockResolvedValueOnce([]);
-    await expect(service.updateAttendance('att-a', { records: [{ studentId: 'outsider', status: AttendanceStatus.PRESENT }] }, admin)).rejects.toMatchObject({ response: { code: 'STUDENT_NOT_IN_CLASS' } });
+    await expect(service.updateAttendance('att-a', { records: [{ studentId: 'outsider', status: AttendanceStatus.PRESENT }] }, hod)).rejects.toMatchObject({ response: { code: 'STUDENT_NOT_IN_CLASS' } });
     expect(tx.attendanceRecord.deleteMany).not.toHaveBeenCalled();
   });
 
@@ -233,12 +235,12 @@ describe('AttendanceService', () => {
       expect(tx.auditLog.create).not.toHaveBeenCalled();
     });
 
-    it('blocks faculty after the window but not HOD or admin', async () => {
+    it('blocks faculty after the window but not the HOD; Admin never corrects', async () => {
       attendance.findFirst.mockResolvedValue(marked(hoursAgo(49)));
       await expect(service.updateAttendance('att-a', { records: [{ studentId: 'stu-a', status: AttendanceStatus.ABSENT }] }, faculty)).rejects.toMatchObject({ response: { code: 'CORRECTION_WINDOW_CLOSED' } });
       expect(tx.attendanceRecord.deleteMany).not.toHaveBeenCalled();
       await expect(service.updateAttendance('att-a', { records: [{ studentId: 'stu-a', status: AttendanceStatus.ABSENT }] }, hod)).resolves.toBeDefined();
-      await expect(service.updateAttendance('att-a', { records: [{ studentId: 'stu-a', status: AttendanceStatus.ABSENT }] }, admin)).resolves.toBeDefined();
+      await expect(service.updateAttendance('att-a', { records: [{ studentId: 'stu-a', status: AttendanceStatus.ABSENT }] }, admin)).rejects.toBeInstanceOf(ForbiddenException);
     });
 
     it('returns the history of a session the caller can open, with student names', async () => {

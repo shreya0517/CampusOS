@@ -4,12 +4,16 @@ import { AuthorizationGuard } from '../authorization/authorization.guard';
 import { CurrentAuthorization, RequireRoles } from '../authorization/authorization.decorator';
 import type { AuthorizationContext } from '../authorization/authorization.types';
 import { AttendanceService } from './attendance.service';
-import { parseAttendanceListQuery, parseClassListQuery, parseCreateAttendanceDto, parseMyAttendanceQuery, parseUpdateAttendanceDto } from './attendance.dto';
+import { parseAttendanceListQuery, parseAttendanceReportQuery, parseClassListQuery, parseCreateAttendanceDto, parseMyAttendanceQuery, parseUpdateAttendanceDto } from './attendance.dto';
+import { AttendanceReportService } from './attendance-report.service';
 
 @Controller()
 @UseGuards(AccessAuthGuard, AuthorizationGuard)
 export class AttendanceController {
-  constructor(@Inject(AttendanceService) private readonly attendance: AttendanceService) {}
+  constructor(
+    @Inject(AttendanceService) private readonly attendance: AttendanceService,
+    @Inject(AttendanceReportService) private readonly reports: AttendanceReportService,
+  ) {}
 
   @Get('classes')
   @RequireRoles('ADMIN', 'HOD', 'FACULTY')
@@ -29,8 +33,10 @@ export class AttendanceController {
     return this.attendance.getClassOverview(id, c);
   }
 
+  // Admin decision 2: Admin monitors attendance but does not mark or edit it; faculty mark, and the HOD corrects after
+  // the faculty correction window.
   @Post('attendance')
-  @RequireRoles('ADMIN', 'HOD', 'FACULTY')
+  @RequireRoles('HOD', 'FACULTY')
   create(@Body() b: unknown, @CurrentAuthorization() c: AuthorizationContext) {
     return this.attendance.createAttendance(parseCreateAttendanceDto(b), c);
   }
@@ -39,6 +45,12 @@ export class AttendanceController {
   @RequireRoles('ADMIN', 'HOD', 'FACULTY')
   list(@Query() q: unknown, @CurrentAuthorization() c: AuthorizationContext) {
     return this.attendance.listAttendance(parseAttendanceListQuery(q), c);
+  }
+
+  @Get('attendance/report')
+  @RequireRoles('ADMIN', 'HOD')
+  report(@Query() q: unknown, @CurrentAuthorization() c: AuthorizationContext) {
+    return this.reports.report(parseAttendanceReportQuery(q), c);
   }
 
   @Get('attendance/me')
@@ -60,7 +72,7 @@ export class AttendanceController {
   }
 
   @Put('attendance/:id')
-  @RequireRoles('ADMIN', 'HOD', 'FACULTY')
+  @RequireRoles('HOD', 'FACULTY')
   update(@Param('id') id: string, @Body() b: unknown, @CurrentAuthorization() c: AuthorizationContext) {
     return this.attendance.updateAttendance(id, parseUpdateAttendanceDto(b), c);
   }

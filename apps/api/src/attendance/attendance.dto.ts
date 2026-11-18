@@ -52,6 +52,14 @@ const optionalDate = (v: unknown): string | undefined => {
   return s;
 };
 
+export const parseAttendanceReportQuery = (v: unknown): { departmentId?: string; from?: string; to?: string } => {
+  const q = object(v);
+  const from = optionalDate(q.from);
+  const to = optionalDate(q.to);
+  if (from && to && from > to) invalid();
+  return { departmentId: optionalString(q.departmentId), from, to };
+};
+
 export const parseMyAttendanceQuery = (v: unknown): MyAttendanceQuery => {
   const q = object(v);
   const from = optionalDate(q.from);
