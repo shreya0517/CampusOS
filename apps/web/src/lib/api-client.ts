@@ -5,7 +5,29 @@ export type AuthResult = { accessToken: string; user: AuthUser };
 
 export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> { let response: Response; try { response = await fetch(`${baseUrl}${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers }, credentials: 'include' }); } catch { throw new ApiError(0, `Unable to reach CampusOS API at ${baseUrl}. Confirm the API is running and CORS_ORIGIN matches this frontend URL.`); } if (!response.ok) { const body = await response.json().catch(() => null) as { message?: string } | null; throw new ApiError(response.status, body?.message ?? `Request failed (${response.status}).`); } return response.status === 204 ? undefined as T : response.json() as Promise<T>; }
 export async function login(input: { collegeCode: string; email: string; password: string }): Promise<AuthResult> { const result = await apiRequest<AuthResult>('/auth/login', { method: 'POST', body: JSON.stringify(input) }); window.sessionStorage.setItem('campusos_access_token', result.accessToken); return result; }
-export async function refreshAccessToken(): Promise<AuthResult> { const result = await apiRequest<AuthResult>('/auth/refresh', { method: 'POST' }); window.sessionStorage.setItem('campusos_access_token', result.accessToken); return result; }
+let refreshing: Promise<AuthResult> | null = null;
+/**
+ * One refresh at a time: requests that get a 401 together share it. Each refresh rotates the refresh cookie, so a
+ * second refresh in parallel would present the old cookie and be refused, signing the user out. If another tab
+ * rotated the cookie just before, the first try is refused and a retry a moment later uses the new cookie.
+ */
+export function refreshAccessToken(): Promise<AuthResult> {
+  const attempt = () => apiRequest<AuthResult>('/auth/refresh', { method: 'POST' });
+  refreshing ??= attempt()
+    .catch(async (error: unknown) => {
+      if (!(error instanceof ApiError) || error.status !== 401) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return attempt();
+    })
+    .then((result) => {
+      window.sessionStorage.setItem('campusos_access_token', result.accessToken);
+      return result;
+    })
+    .finally(() => {
+      refreshing = null;
+    });
+  return refreshing;
+}
 export function clearAccessToken(): void { window.sessionStorage.removeItem('campusos_access_token'); }
 export async function authenticatedRequest<T>(path: string, init?: RequestInit): Promise<T> { const token = window.sessionStorage.getItem('campusos_access_token'); try { return await apiRequest<T>(path, { ...init, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...init?.headers } }); } catch (error) { if (error instanceof ApiError && error.status === 401 && token) { const session = await refreshAccessToken(); return apiRequest<T>(path, { ...init, headers: { Authorization: `Bearer ${session.accessToken}`, ...init?.headers } }); } throw error; } }
 /** Downloads a file (such as a CSV export) with the signed-in user's token, refreshing it once if it has expired. */

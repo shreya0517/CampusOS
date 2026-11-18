@@ -1,3 +1,4 @@
+import { UnauthorizedException } from '@nestjs/common';
 import { EventsGateway } from './events.gateway';
 import type { AuthService } from '../auth/auth.service';
 import type { AuthorizationService } from '../authorization/authorization.service';
@@ -9,6 +10,7 @@ describe('EventsGateway', () => {
   let mockAuthService: {
     verifyAccessToken: jest.Mock;
     authorizeAccessToken: jest.Mock;
+    authorizeSession: jest.Mock;
   };
   let mockAuthorizationService: {
     getContext: jest.Mock;
@@ -33,6 +35,7 @@ describe('EventsGateway', () => {
     mockAuthService = {
       verifyAccessToken: jest.fn(),
       authorizeAccessToken: jest.fn(),
+      authorizeSession: jest.fn(),
     };
     mockAuthorizationService = {
       getContext: jest.fn(),
@@ -46,6 +49,50 @@ describe('EventsGateway', () => {
       mockAuthorizationService as unknown as AuthorizationService,
       mockEventsService as unknown as EventsService,
     );
+  });
+
+  describe('re-checking connected sockets', () => {
+    const facultyContext = { userId: 'faculty-1', collegeId: 'college-alpha', roles: ['FACULTY'] as ('SUPER_ADMIN' | 'ADMIN' | 'HOD' | 'FACULTY' | 'STUDENT')[], permissions: [] as never[], departmentId: 'dept-cs' };
+    const connect = async () => {
+      const client = { ...createMockSocket('token'), leave: jest.fn(), rooms: new Set<string>() };
+      client.join.mockImplementation((room: string) => client.rooms.add(room));
+      client.leave.mockImplementation((room: string) => client.rooms.delete(room));
+      client.rooms.add(client.id);
+      mockAuthService.verifyAccessToken.mockReturnValue({ sub: 'faculty-1', collegeId: 'college-alpha', sid: 'session-1', exp: Date.now() + 10000 });
+      mockAuthService.authorizeAccessToken.mockResolvedValue({ id: 'faculty-1', collegeId: 'college-alpha', roles: ['FACULTY'] });
+      mockAuthorizationService.getContext.mockResolvedValue(facultyContext);
+      await gateway.handleConnection(client as never);
+      return client;
+    };
+
+    it('disconnects a socket whose session has ended', async () => {
+      const client = await connect();
+      mockAuthService.authorizeSession.mockRejectedValue(new UnauthorizedException({ code: 'SESSION_EXPIRED' }));
+      await gateway.recheck(client as never);
+      expect(mockAuthService.authorizeSession).toHaveBeenCalledWith('session-1', 'faculty-1', 'college-alpha');
+      expect(client.emit).toHaveBeenCalledWith('auth:error', { message: 'Your session has ended.' });
+      expect(client.disconnect).toHaveBeenCalledWith(true);
+    });
+
+    it('moves a socket to the rooms its new role allows', async () => {
+      const client = await connect();
+      expect(client.rooms.has(roleRoom('college-alpha', 'FACULTY'))).toBe(true);
+      mockAuthService.authorizeSession.mockResolvedValue({ id: 'faculty-1' });
+      mockAuthorizationService.getContext.mockResolvedValue({ ...facultyContext, roles: ['HOD'] });
+      await gateway.recheck(client as never);
+      expect(client.rooms.has(roleRoom('college-alpha', 'FACULTY'))).toBe(false);
+      expect(client.rooms.has(roleRoom('college-alpha', 'HOD'))).toBe(true);
+      expect(client.rooms.has(departmentHeadsRoom('college-alpha', 'dept-cs'))).toBe(true);
+      expect(client.rooms.has(client.id)).toBe(true);
+      expect(client.disconnect).not.toHaveBeenCalled();
+    });
+
+    it('keeps the socket when the check itself fails, such as a database error', async () => {
+      const client = await connect();
+      mockAuthService.authorizeSession.mockRejectedValue(new Error('connection refused'));
+      await gateway.recheck(client as never);
+      expect(client.disconnect).not.toHaveBeenCalled();
+    });
   });
 
   describe('afterInit', () => {

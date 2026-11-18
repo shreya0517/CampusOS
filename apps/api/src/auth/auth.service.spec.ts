@@ -132,6 +132,29 @@ describe('AuthService', () => {
     await expect(service.authorizeAccessToken('invalid.token.value')).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
+  it('revokes the session when an old refresh token is replayed, but not for a parallel refresh moments after rotation', async () => {
+    const database = createDatabase();
+    const service = new AuthService(database as never);
+    // The presented token is no session's current one, but it is one session's previous token.
+    database.authSession.findUnique.mockImplementation(({ where }: { where: { refreshTokenHash?: string; previousRefreshTokenHash?: string } }) =>
+      Promise.resolve(where.previousRefreshTokenHash ? { id: 'session-1', rotatedAt: new Date(Date.now() - 5 * 60_000), revokedAt: null } : null),
+    );
+    await expect(service.refresh('stolen-token')).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(database.authSession.updateMany).toHaveBeenCalledWith({ where: { id: 'session-1', revokedAt: null }, data: { revokedAt: expect.any(Date) } });
+
+    database.authSession.updateMany.mockClear();
+    database.authSession.findUnique.mockImplementation(({ where }: { where: { previousRefreshTokenHash?: string } }) =>
+      Promise.resolve(where.previousRefreshTokenHash ? { id: 'session-1', rotatedAt: new Date(Date.now() - 2_000), revokedAt: null } : null),
+    );
+    await expect(service.refresh('other-tab-token')).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(database.authSession.updateMany).not.toHaveBeenCalled();
+
+    // An unknown token revokes nothing.
+    database.authSession.findUnique.mockResolvedValue(null);
+    await expect(service.refresh('garbage')).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(database.authSession.updateMany).not.toHaveBeenCalled();
+  });
+
   it('rotates refresh sessions and rejects revoked refresh sessions', async () => {
     const database = createDatabase();
     database.authSession.findUnique.mockResolvedValue(activeSession);
@@ -139,6 +162,10 @@ describe('AuthService', () => {
     const service = new AuthService(database as never);
     await expect(service.refresh('refresh-token')).resolves.toMatchObject({ accessToken: expect.any(String), refreshToken: expect.any(String) });
     expect(database.authSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ refreshTokenHash: expect.any(String) }), data: expect.objectContaining({ refreshTokenHash: expect.any(String) }) }));
+    // The token just used is kept as the previous one, with the time, so presenting it again is recognised.
+    const rotation = database.authSession.updateMany.mock.calls[0][0] as { where: { refreshTokenHash: string }; data: { previousRefreshTokenHash: string; rotatedAt: Date } };
+    expect(rotation.data.previousRefreshTokenHash).toBe(rotation.where.refreshTokenHash);
+    expect(rotation.data.rotatedAt).toBeInstanceOf(Date);
     database.authSession.updateMany.mockResolvedValue({ count: 0 });
     await expect(service.refresh('refresh-token')).rejects.toBeInstanceOf(UnauthorizedException);
     database.authSession.findUnique.mockResolvedValue({ ...activeSession, revokedAt: new Date() });

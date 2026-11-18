@@ -37,6 +37,9 @@ All authentication endpoints are under `/api/v1/auth`. Registration and login re
 - `POST /api/v1/auth/register`: off by default and returns `403 REGISTRATION_DISABLED`, because Admins create student and faculty accounts and a self-registered account has no role. Set `ALLOW_SELF_REGISTRATION=true` to turn it on. When on, it accepts `{ "collegeCode", "email", "displayName", "password" }`; the password must have at least 12 characters. Returns `201 { "user": { ... } }`, creates an unverified account and an email-verification token record, and never returns that token.
 - `POST /api/v1/auth/login`: accepts `{ "collegeCode", "email", "password" }`. Returns `200 { "accessToken", "user" }` and writes a rotating `campusos_refresh` cookie with `HttpOnly`, `SameSite=Lax`, scoped to `/api/v1/auth`, and `Secure` in production.
 - `POST /api/v1/auth/refresh`: uses the refresh cookie, rotates it, and returns `200 { "accessToken", "user" }`. Expired or revoked sessions return `401 SESSION_EXPIRED`.
+  - The session remembers the token it just replaced. Presenting that old token again is a reuse: someone may have stolen it, so the whole session is revoked and both holders must sign in again.
+  - Within 30 seconds of the rotation, a reuse is taken to be another tab refreshing at the same moment and is only refused.
+  - The web app sends one refresh at a time per tab, and retries once shortly after a refusal, to pick up a cookie another tab just rotated.
 - `POST /api/v1/auth/logout`: uses the refresh cookie, revokes its session, clears the cookie, and returns `204`. Access tokens for that session fail immediately.
 - `GET /api/v1/auth/me`: requires `Authorization: Bearer <access-token>` and returns `200 { "user": { "id", "collegeId", "email", "displayName", "emailVerified" } }`.
 - `POST /api/v1/auth/verify-email`: accepts `{ "token" }`, consumes an opaque email-verification token, and returns `204`.
