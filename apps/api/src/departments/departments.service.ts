@@ -128,13 +128,15 @@ export class DepartmentsService {
       newUserId = candidate.userId;
     }
 
-    const current = await this.database.faculty.findMany({
-      where: { collegeId: context.collegeId, departmentId: id, userId: { not: null }, user: { is: { userRoles: { some: { role: { name: 'HOD' } } } } } },
-      select: { id: true, userId: true },
-    });
-    const removedUserIds = current.map((member) => member.userId as string).filter((userId) => userId !== newUserId);
-
     await this.database.$transaction(async (tx) => {
+      // Touching the department row locks it, so two HOD changes for the same department run one after the other and
+      // the second sees the first one's result; otherwise both could keep their own HOD.
+      await tx.department.update({ where: { collegeId_id: { collegeId: context.collegeId, id } }, data: { updatedAt: new Date() } });
+      const current = await tx.faculty.findMany({
+        where: { collegeId: context.collegeId, departmentId: id, userId: { not: null }, user: { is: { userRoles: { some: { role: { name: 'HOD' } } } } } },
+        select: { id: true, userId: true },
+      });
+      const removedUserIds = current.map((member) => member.userId as string).filter((userId) => userId !== newUserId);
       const role = await tx.role.upsert({ where: { collegeId_name: { collegeId: context.collegeId, name: 'HOD' } }, update: {}, create: { collegeId: context.collegeId, name: 'HOD' } });
       if (removedUserIds.length) await tx.userRole.deleteMany({ where: { collegeId: context.collegeId, roleId: role.id, userId: { in: removedUserIds } } });
       if (newUserId) {

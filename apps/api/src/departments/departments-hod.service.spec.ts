@@ -18,6 +18,7 @@ function createDatabase() {
         { id: 'dept-ece', code: 'ECE', name: 'Electronics', faculty: [], _count: { courses: 0, subjects: 0 } },
       ]),
       count: jest.fn().mockResolvedValue(2),
+      update: jest.fn(),
     },
     faculty: {
       findFirst: jest.fn().mockResolvedValue({ id: 'fac-2', departmentId: 'dept-cse', userId: 'user-2', user: { status: 'ACTIVE' } }),
@@ -68,6 +69,9 @@ describe('DepartmentsService HOD assignment and counts', () => {
     expect(database.userRole.deleteMany).toHaveBeenCalledWith({ where: { collegeId: 'college-a', roleId: 'role-hod', userId: { in: ['user-1'] } } });
     expect(database.userRole.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: { collegeId: 'college-a', userId: 'user-2', roleId: 'role-hod' } }));
     expect(database.auditLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({ action: 'DEPARTMENT_HOD_CHANGED', entityId: 'dept-cse', metadata: { from: ['fac-1'], to: 'fac-2' } }) });
+    // The department row is locked first and the current HOD read inside the same transaction.
+    expect(database.department.update).toHaveBeenCalledWith({ where: { collegeId_id: { collegeId: 'college-a', id: 'dept-cse' } }, data: { updatedAt: expect.any(Date) } });
+    expect(database.department.update.mock.invocationCallOrder[0]).toBeLessThan(database.faculty.findMany.mock.invocationCallOrder[0] as number);
   });
 
   it('removes the HOD when given null', async () => {
