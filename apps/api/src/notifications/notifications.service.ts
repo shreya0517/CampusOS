@@ -29,29 +29,40 @@ export class NotificationsService {
   ) {}
 
   async notify(collegeId: string, userIds: Iterable<string | null | undefined>, input: NotificationInput): Promise<void> {
-    const recipients = [...new Set([...userIds].filter((id): id is string => Boolean(id)))];
-    if (!recipients.length) return;
     try {
-      const now = new Date();
-      for (let start = 0; start < recipients.length; start += BATCH_SIZE) {
-        await this.database.notification.createMany({
-          data: recipients.slice(start, start + BATCH_SIZE).map((userId) => ({
-            collegeId,
-            userId,
-            channel: 'IN_APP' as const,
-            status: 'SENT' as const,
-            category: input.category,
-            title: input.title.slice(0, 200),
-            body: input.body.slice(0, 1000),
-            link: input.link ?? null,
-            sentAt: now,
-          })),
-        });
-      }
-      for (const userId of recipients) this.events.emitToUser(userId, NOTIFICATION_EVENT, { category: input.category, title: input.title, link: input.link ?? null });
+      const push = await this.store(this.database, collegeId, userIds, input);
+      push();
     } catch (error) {
-      this.logger.error(`Could not store a ${input.category} notification for ${recipients.length} user(s): ${(error as Error).message}`);
+      this.logger.error(`Could not store a ${input.category} notification: ${(error as Error).message}`);
     }
+  }
+
+  /**
+   * Stores notifications with the given client, for example inside the caller's transaction, and returns the function
+   * that pushes them live; call it once that transaction has committed. Unlike `notify`, errors are thrown, so the
+   * caller's transaction rolls back.
+   */
+  async store(client: Pick<DatabaseService, 'notification'>, collegeId: string, userIds: Iterable<string | null | undefined>, input: NotificationInput): Promise<() => void> {
+    const recipients = [...new Set([...userIds].filter((id): id is string => Boolean(id)))];
+    const now = new Date();
+    for (let start = 0; start < recipients.length; start += BATCH_SIZE) {
+      await client.notification.createMany({
+        data: recipients.slice(start, start + BATCH_SIZE).map((userId) => ({
+          collegeId,
+          userId,
+          channel: 'IN_APP' as const,
+          status: 'SENT' as const,
+          category: input.category,
+          title: input.title.slice(0, 200),
+          body: input.body.slice(0, 1000),
+          link: input.link ?? null,
+          sentAt: now,
+        })),
+      });
+    }
+    return () => {
+      for (const userId of recipients) this.events.emitToUser(userId, NOTIFICATION_EVENT, { category: input.category, title: input.title, link: input.link ?? null });
+    };
   }
 
   /**

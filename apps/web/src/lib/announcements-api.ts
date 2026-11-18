@@ -15,8 +15,15 @@ export type Announcement = {
   section: { id: string; code: string } | null;
   publishedAt: string;
   expiresAt: string | null;
+  notifiedAt: string | null;
+  archivedAt: string | null;
   author: { id: string; displayName: string };
 };
+export type AnnouncementState = 'PUBLISHED' | 'SCHEDULED' | 'EXPIRED' | 'ARCHIVED';
+export type ManagedAnnouncement = Announcement & { state: AnnouncementState };
+export type AnnouncementHistory = List<ManagedAnnouncement> & { counts: Record<AnnouncementState, number> };
+
+export const STATE_LABEL: Record<AnnouncementState, string> = { PUBLISHED: 'Published', SCHEDULED: 'Scheduled', EXPIRED: 'Expired', ARCHIVED: 'Archived' };
 type List<T> = { items: T[]; total: number; page: number; pageSize: number };
 
 export const AUDIENCE_LABEL: Record<AnnouncementAudience, string> = {
@@ -55,3 +62,11 @@ export type NewAnnouncement = {
 
 export const listAnnouncements = (q: URLSearchParams = new URLSearchParams()): Promise<List<Announcement>> => authenticatedRequest(`/announcements?${q}`);
 export const createAnnouncement = (input: NewAnnouncement): Promise<Announcement> => authenticatedRequest('/announcements', { method: 'POST', body: JSON.stringify(input) });
+
+/** Admin only: every announcement in the college, filtered by `state`, `category` and `search`. */
+export const listAnnouncementHistory = (q: URLSearchParams): Promise<AnnouncementHistory> => authenticatedRequest(`/announcements/manage?${q}`);
+/** Admin only. The whole announcement as on the form; `publishedAt` only moves a scheduled one, `expiresAt: null` clears it. */
+export const updateAnnouncement = (id: string, input: Omit<NewAnnouncement, 'expiresAt'> & { expiresAt: string | null }): Promise<ManagedAnnouncement> =>
+  authenticatedRequest(`/announcements/${id}`, { method: 'PUT', body: JSON.stringify(input) });
+export const archiveAnnouncement = (id: string): Promise<ManagedAnnouncement> => authenticatedRequest(`/announcements/${id}/archive`, { method: 'POST' });
+export const restoreAnnouncement = (id: string): Promise<ManagedAnnouncement> => authenticatedRequest(`/announcements/${id}/restore`, { method: 'POST' });
