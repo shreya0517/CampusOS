@@ -238,8 +238,12 @@ export default function TaskDetailPage() {
                   <span className="break-words">{myAssignment.submissionContent}</span>
                 </>}
                 {myAssignment.notes && <>
-                  <span className="font-medium">Notes</span>
-                  <span>{myAssignment.notes}</span>
+                  <span className="font-medium">Instructions</span>
+                  <span className="break-words">{myAssignment.notes}</span>
+                </>}
+                {myAssignment.reviewNotes && <>
+                  <span className="font-medium">Reviewer feedback</span>
+                  <span className="break-words">{myAssignment.reviewNotes}</span>
                 </>}
               </div>
               <div className="flex flex-wrap gap-2">

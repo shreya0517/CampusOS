@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import type { DatabaseService } from '../database.service';
 import type { EventsService } from '../events/events.service';
@@ -20,7 +20,11 @@ type MockDb = {
     findMany: jest.Mock;
     count: jest.Mock;
     update: jest.Mock;
+    updateMany: jest.Mock;
+    findUniqueOrThrow: jest.Mock;
   };
+  auditLog: { create: jest.Mock };
+  $transaction: jest.Mock;
   faculty: {
     findFirst: jest.Mock;
   };
@@ -66,7 +70,11 @@ describe('TasksService WebSocket Event Emissions', () => {
         findMany: jest.fn(),
         count: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'assign-1', assignee: { displayName: 'Dr. Priya Sharma' } }),
       },
+      auditLog: { create: jest.fn() },
+      $transaction: jest.fn(),
       faculty: {
         findFirst: jest.fn(),
       },
@@ -75,6 +83,8 @@ describe('TasksService WebSocket Event Emissions', () => {
         findFirst: jest.fn().mockResolvedValue({ facultyProfiles: [{ departmentId: 'dept-1' }] }),
       },
     };
+
+    mockDatabase.$transaction.mockImplementation((work: (tx: MockDb) => Promise<unknown>) => work(mockDatabase));
 
     mockEventsService = {
       emitTaskCreated: jest.fn(),
@@ -222,9 +232,14 @@ describe('TasksService WebSocket Event Emissions', () => {
         },
       };
       mockDatabase.taskAssignment.findFirst.mockResolvedValue(existing);
-      mockDatabase.taskAssignment.update.mockResolvedValue({ ...existing, status: TaskStatus.IN_PROGRESS });
 
       await service.updateMyAssignment('assign-1', { status: TaskStatus.IN_PROGRESS }, facultyContext);
+
+      // Only if still pending, and the assignee's notes never replace the assigner's instructions.
+      expect(mockDatabase.taskAssignment.updateMany).toHaveBeenCalledWith({
+        where: { id: 'assign-1', collegeId: 'college-1', assigneeUserId: 'faculty-1', status: TaskStatus.PENDING },
+        data: { status: TaskStatus.IN_PROGRESS },
+      });
 
       expect(mockEventsService.emitTaskStarted).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -234,6 +249,21 @@ describe('TasksService WebSocket Event Emissions', () => {
         }),
         'college-1',
       );
+    });
+
+    it('never marks work submitted through a status change', async () => {
+      mockDatabase.taskAssignment.findFirst.mockResolvedValue({ id: 'assign-1', status: TaskStatus.IN_PROGRESS, task: { id: 'task-100', title: 'Grade midterms' } });
+      await expect(service.updateMyAssignment('assign-1', { status: TaskStatus.SUBMITTED }, facultyContext)).rejects.toBeInstanceOf(BadRequestException);
+      mockDatabase.taskAssignment.findFirst.mockResolvedValue({ id: 'assign-1', status: TaskStatus.REWORK, task: { id: 'task-100', title: 'Grade midterms' } });
+      await expect(service.updateMyAssignment('assign-1', { status: TaskStatus.SUBMITTED }, facultyContext)).rejects.toBeInstanceOf(BadRequestException);
+      expect(mockDatabase.taskAssignment.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('reports a status that changed in the meantime', async () => {
+      mockDatabase.taskAssignment.findFirst.mockResolvedValue({ id: 'assign-1', status: TaskStatus.PENDING, task: { id: 'task-100', title: 'Grade midterms' } });
+      mockDatabase.taskAssignment.updateMany.mockResolvedValueOnce({ count: 0 });
+      await expect(service.updateMyAssignment('assign-1', { status: TaskStatus.IN_PROGRESS }, facultyContext)).rejects.toMatchObject({ response: { code: 'TASK_STATUS_CHANGED' } });
+      expect(mockEventsService.emitTaskStarted).not.toHaveBeenCalled();
     });
   });
 
@@ -252,10 +282,18 @@ describe('TasksService WebSocket Event Emissions', () => {
           departmentId: 'dept-1',
         },
       };
-      mockDatabase.taskAssignment.findFirst.mockResolvedValue(existing);
-      mockDatabase.taskAssignment.update.mockResolvedValue({ ...existing, status: TaskStatus.SUBMITTED });
+      mockDatabase.taskAssignment.findFirst.mockResolvedValue({ ...existing, taskId: 'task-100' });
 
       await service.submitTask('assign-1', { content: 'All graded' }, facultyContext);
+
+      expect(mockDatabase.taskAssignment.updateMany).toHaveBeenCalledWith({
+        where: { id: 'assign-1', collegeId: 'college-1', assigneeUserId: 'faculty-1', status: { in: [TaskStatus.IN_PROGRESS, TaskStatus.REWORK] } },
+        data: { status: TaskStatus.SUBMITTED, submissionContent: 'All graded', submittedAt: expect.any(Date) },
+      });
+      // Every attempt is kept, since a resubmission replaces the stored content.
+      expect(mockDatabase.auditLog.create).toHaveBeenCalledWith({
+        data: { collegeId: 'college-1', actorId: 'faculty-1', action: 'TASK_SUBMITTED', entityType: 'TaskAssignment', entityId: 'assign-1', metadata: { taskId: 'task-100', content: 'All graded' } },
+      });
 
       expect(mockEventsService.emitTaskSubmitted).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -266,6 +304,21 @@ describe('TasksService WebSocket Event Emissions', () => {
         'college-1',
         'dept-1',
       );
+    });
+
+    it.each([TaskStatus.PENDING, TaskStatus.SUBMITTED, TaskStatus.APPROVED])('refuses to submit work that is %s', async (status) => {
+      mockDatabase.taskAssignment.findFirst.mockResolvedValue({ id: 'assign-1', status, task: { id: 'task-100', title: 'Grade midterms' } });
+      await expect(service.submitTask('assign-1', { content: 'Again' }, facultyContext)).rejects.toMatchObject({ response: { code: 'INVALID_STATUS_TRANSITION' } });
+      expect(mockDatabase.taskAssignment.updateMany).not.toHaveBeenCalled();
+      expect(mockEventsService.emitTaskSubmitted).not.toHaveBeenCalled();
+    });
+
+    it('refuses a submission when the assignment was reviewed in the meantime', async () => {
+      mockDatabase.taskAssignment.findFirst.mockResolvedValue({ id: 'assign-1', status: TaskStatus.REWORK, task: { id: 'task-100', title: 'Grade midterms' } });
+      mockDatabase.taskAssignment.updateMany.mockResolvedValueOnce({ count: 0 });
+      await expect(service.submitTask('assign-1', { content: 'Again' }, facultyContext)).rejects.toBeInstanceOf(ConflictException);
+      expect(mockDatabase.auditLog.create).not.toHaveBeenCalled();
+      expect(mockEventsService.emitTaskSubmitted).not.toHaveBeenCalled();
     });
   });
 
@@ -284,12 +337,18 @@ describe('TasksService WebSocket Event Emissions', () => {
           departmentId: 'dept-1',
         },
       };
-      mockDatabase.taskAssignment.findFirst.mockResolvedValue(existing);
-      mockDatabase.taskAssignment.update.mockResolvedValue({ ...existing, status: TaskStatus.APPROVED });
-      mockDatabase.taskAssignment.findMany.mockResolvedValue([{ status: TaskStatus.APPROVED }]);
-      mockDatabase.task.update.mockResolvedValue({});
+      mockDatabase.taskAssignment.findFirst.mockResolvedValue({ ...existing, taskId: 'task-100' });
 
       await service.reviewSubmission('assign-1', { decision: 'APPROVED', notes: 'Great job' }, adminContext);
+
+      // Only while still submitted; the feedback goes in reviewNotes, leaving the instructions in notes alone.
+      expect(mockDatabase.taskAssignment.updateMany).toHaveBeenCalledWith({
+        where: { id: 'assign-1', collegeId: 'college-1', status: TaskStatus.SUBMITTED },
+        data: { status: TaskStatus.APPROVED, reviewedAt: expect.any(Date), reviewedByUserId: 'admin-1', reviewNotes: 'Great job' },
+      });
+      expect(mockDatabase.auditLog.create).toHaveBeenCalledWith({
+        data: { collegeId: 'college-1', actorId: 'admin-1', action: 'TASK_REVIEWED', entityType: 'TaskAssignment', entityId: 'assign-1', metadata: { taskId: 'task-100', decision: 'APPROVED', notes: 'Great job' } },
+      });
 
       expect(mockEventsService.emitTaskReviewed).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -300,6 +359,33 @@ describe('TasksService WebSocket Event Emissions', () => {
         'college-1',
         'faculty-1',
       );
+    });
+
+    it('lets only one reviewer decide a submission', async () => {
+      mockDatabase.taskAssignment.findFirst.mockResolvedValue({ id: 'assign-1', status: TaskStatus.SUBMITTED, assigneeUserId: 'faculty-1', taskId: 'task-100', task: { id: 'task-100', title: 'Grade midterms', departmentId: 'dept-1' } });
+      mockDatabase.taskAssignment.updateMany.mockResolvedValueOnce({ count: 0 });
+      await expect(service.reviewSubmission('assign-1', { decision: 'REWORK' }, adminContext)).rejects.toMatchObject({ response: { code: 'TASK_STATUS_CHANGED' } });
+      expect(mockEventsService.emitTaskReviewed).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('shared tasks', () => {
+    it('gives faculty only their own assignment of a shared task, and managers every one', async () => {
+      mockDatabase.task.findFirst.mockResolvedValue({ id: 'task-100' });
+      await service.getTask('task-100', facultyContext);
+      expect(mockDatabase.task.findFirst).toHaveBeenLastCalledWith(
+        expect.objectContaining({ include: expect.objectContaining({ assignments: expect.objectContaining({ where: { assigneeUserId: 'faculty-1' } }) }) }),
+      );
+      await service.getTask('task-100', adminContext);
+      const include = (mockDatabase.task.findFirst.mock.calls.at(-1)?.[0] as { include: { assignments: Record<string, unknown> } }).include;
+      expect(include.assignments).not.toHaveProperty('where');
+    });
+
+    it('tells everyone on a task when it is edited', async () => {
+      mockDatabase.task.findFirst.mockResolvedValue({ id: 'task-100', departmentId: 'dept-1', assignments: [{ assigneeUserId: 'faculty-1' }, { assigneeUserId: 'faculty-2' }] });
+      mockDatabase.task.update.mockResolvedValue({ id: 'task-100', title: 'Grade finals', departmentId: 'dept-1' });
+      await service.updateTask('task-100', { title: 'Grade finals' }, adminContext);
+      expect(mockEventsService.emitTaskUpdated).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'task-100' }), 'college-1', 'dept-1', ['faculty-1', 'faculty-2']);
     });
   });
 });

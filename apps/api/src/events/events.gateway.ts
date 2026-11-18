@@ -10,7 +10,7 @@ import { AuthService, type AccessPayload } from '../auth/auth.service';
 import { AuthorizationService } from '../authorization/authorization.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
 import { EventsService } from './events.service';
-import { collegeRoom, departmentRoom, roleRoom, userRoom } from './events.types';
+import { collegeRoom, departmentHeadsRoom, departmentRoom, roleRoom, userRoom } from './events.types';
 
 /**
  * Socket metadata stored on each authenticated connection.
@@ -141,6 +141,8 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     // 4. Department room — for HOD / faculty scoped to a department.
     if (ctx.departmentId) {
       client.join(departmentRoom(ctx.collegeId, ctx.departmentId));
+      // 5. The department's HODs, who oversee its tasks.
+      if (ctx.roles.includes('HOD')) client.join(departmentHeadsRoom(ctx.collegeId, ctx.departmentId));
     }
   }
 

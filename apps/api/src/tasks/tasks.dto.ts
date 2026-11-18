@@ -22,9 +22,9 @@ export type AssignTaskDto = {
   notes?: string;
 };
 
+/** The assignee starts or resumes work. Notes stay with the assigner, so they aren't taken here. */
 export type UpdateAssignmentStatusDto = {
   status: TaskStatus;
-  notes?: string;
 };
 
 export type SubmitTaskDto = {
@@ -116,7 +116,6 @@ export const parseUpdateAssignmentStatusDto = (v: unknown): UpdateAssignmentStat
   if (!VALID_TASK_STATUSES.includes(status)) invalid();
   return {
     status: status as TaskStatus,
-    notes: optionalString(b.notes),
   };
 };
 

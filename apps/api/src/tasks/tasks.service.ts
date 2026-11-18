@@ -21,6 +21,11 @@ const denied = (): never => {
 const taskMissing = (): never => {
   throw new NotFoundException({ code: 'TASK_NOT_FOUND', message: 'Task was not found.' });
 };
+/** Work can be submitted while in progress, or again after it was returned for rework. */
+const SUBMITTABLE: TaskStatus[] = [TaskStatus.IN_PROGRESS, TaskStatus.REWORK];
+const statusChanged = (): never => {
+  throw new ConflictException({ code: 'TASK_STATUS_CHANGED', message: 'This assignment changed in the meantime. Reload and try again.' });
+};
 const assignmentMissing = (): never => {
   throw new NotFoundException({ code: 'TASK_ASSIGNMENT_NOT_FOUND', message: 'Task assignment was not found.' });
 };
@@ -155,11 +160,13 @@ export class TasksService {
       where.departmentId = this.hodDepartmentId(context);
     }
 
+    const manager = this.isAdmin(context) || this.isHod(context);
     const task = await this.database.task.findFirst({
       where,
       include: {
         ...taskInclude,
-        assignments: { include: assignmentInclude },
+        // Someone working on a shared task sees only their own assignment, never the others' emails or submissions.
+        assignments: { ...(manager ? {} : { where: { assigneeUserId: context.userId } }), include: assignmentInclude },
         _count: { select: { assignments: true } },
       },
     });
@@ -169,13 +176,13 @@ export class TasksService {
 
   async updateTask(id: string, input: UpdateTaskDto, context: AuthorizationContext): Promise<unknown> {
     this.requireAdminOrHod(context);
-    await this.getTask(id, context);
+    const before = (await this.getTask(id, context)) as { departmentId: string | null; assignments: { assigneeUserId: string }[] };
 
     if (this.isHod(context) && !this.isAdmin(context) && input.departmentId) {
       if (input.departmentId !== this.hodDepartmentId(context)) denied();
     }
 
-    return this.database.task.update({
+    const updated = await this.database.task.update({
       where: { id },
       data: {
         ...(input.title !== undefined ? { title: input.title } : {}),
@@ -186,6 +193,12 @@ export class TasksService {
       },
       include: taskInclude,
     });
+    // Open task pages refresh, including the assignees' and, if the task moved, the old department's HODs'.
+    const assignees = before.assignments.map((assignment) => assignment.assigneeUserId);
+    const payload = this.buildPayload(updated, context, `Task updated: ${updated.title}`);
+    this.events.emitTaskUpdated(payload, context.collegeId, updated.departmentId, assignees);
+    if (before.departmentId && before.departmentId !== updated.departmentId) this.events.emitTaskUpdated(payload, context.collegeId, before.departmentId);
+    return updated;
   }
 
   async deleteTask(id: string, context: AuthorizationContext): Promise<{ success: boolean }> {
@@ -259,28 +272,26 @@ export class TasksService {
     });
     if (!existing) assignmentMissing();
 
-    // Status flow guard: only allow forward transitions
+    // The assignee can only start, or resume after rework. Submitting goes through submitTask, which records the work.
     const allowedFrom: Partial<Record<TaskStatus, TaskStatus[]>> = {
       [TaskStatus.PENDING]: [TaskStatus.IN_PROGRESS],
-      [TaskStatus.IN_PROGRESS]: [TaskStatus.SUBMITTED],
-      [TaskStatus.REWORK]: [TaskStatus.IN_PROGRESS, TaskStatus.SUBMITTED],
+      [TaskStatus.REWORK]: [TaskStatus.IN_PROGRESS],
     };
     const allowed = allowedFrom[existing!.status] ?? [];
     if (!allowed.includes(input.status)) {
       throw new BadRequestException({
         code: 'INVALID_STATUS_TRANSITION',
-        message: `Cannot transition from ${existing!.status} to ${input.status}.`,
+        message: input.status === TaskStatus.SUBMITTED ? 'Submit your work with the submission form.' : `Cannot transition from ${existing!.status} to ${input.status}.`,
       });
     }
 
-    const updated = await this.database.taskAssignment.update({
-      where: { id: assignmentId },
-      data: {
-        status: input.status,
-        ...(input.notes !== undefined ? { notes: input.notes } : {}),
-      },
-      include: assignmentInclude,
+    // Only if nothing changed it since it was read. The assignee can't edit notes: they hold the assigner's instructions.
+    const written = await this.database.taskAssignment.updateMany({
+      where: { id: assignmentId, collegeId: context.collegeId, assigneeUserId: context.userId, status: existing!.status },
+      data: { status: input.status },
     });
+    if (written.count !== 1) statusChanged();
+    const updated = await this.database.taskAssignment.findUniqueOrThrow({ where: { id: assignmentId }, include: assignmentInclude });
 
     if (input.status === TaskStatus.IN_PROGRESS) {
       this.events.emitTaskStarted(
@@ -301,16 +312,24 @@ export class TasksService {
       include: { task: true },
     });
     if (!existing) assignmentMissing();
+    if (!SUBMITTABLE.includes(existing!.status)) {
+      throw new ConflictException({ code: 'INVALID_STATUS_TRANSITION', message: 'Only work in progress, or work returned for rework, can be submitted.' });
+    }
 
-    const updated = await this.database.taskAssignment.update({
-      where: { id: assignmentId },
-      data: {
-        status: TaskStatus.SUBMITTED,
-        submissionContent: input.content,
-        submittedAt: new Date(),
-      },
-      include: assignmentInclude,
+    const now = new Date();
+    await this.database.$transaction(async (tx) => {
+      // Only from in progress or rework, checked again in the write, so approved work can't be reopened by submitting.
+      const written = await tx.taskAssignment.updateMany({
+        where: { id: assignmentId, collegeId: context.collegeId, assigneeUserId: context.userId, status: { in: SUBMITTABLE } },
+        data: { status: TaskStatus.SUBMITTED, submissionContent: input.content, submittedAt: now },
+      });
+      if (written.count !== 1) statusChanged();
+      // Each attempt is kept in the audit log, since a resubmission replaces the stored content.
+      await tx.auditLog.create({
+        data: { collegeId: context.collegeId, actorId: context.userId, action: 'TASK_SUBMITTED', entityType: 'TaskAssignment', entityId: assignmentId, metadata: { taskId: existing!.taskId, content: input.content } },
+      });
     });
+    const updated = await this.database.taskAssignment.findUniqueOrThrow({ where: { id: assignmentId }, include: assignmentInclude });
 
     this.events.emitTaskSubmitted(
       this.buildPayload(existing!.task, context, `Task submitted: ${existing!.task.title}`, {
@@ -355,16 +374,20 @@ export class TasksService {
 
     const newStatus = input.decision === 'APPROVED' ? TaskStatus.APPROVED : TaskStatus.REWORK;
 
-    const updated = await this.database.taskAssignment.update({
-      where: { id: assignmentId },
-      data: {
-        status: newStatus,
-        reviewedAt: new Date(),
-        reviewedByUserId: context.userId,
-        ...(input.notes !== undefined ? { notes: input.notes } : {}),
-      },
-      include: assignmentInclude,
+    const now = new Date();
+    await this.database.$transaction(async (tx) => {
+      // Only while still submitted, so two reviewers can't both decide it.
+      const written = await tx.taskAssignment.updateMany({
+        where: { id: assignmentId, collegeId: context.collegeId, status: TaskStatus.SUBMITTED },
+        // Feedback goes in reviewNotes, so the assigner's instructions in notes are kept.
+        data: { status: newStatus, reviewedAt: now, reviewedByUserId: context.userId, reviewNotes: input.notes ?? null },
+      });
+      if (written.count !== 1) statusChanged();
+      await tx.auditLog.create({
+        data: { collegeId: context.collegeId, actorId: context.userId, action: 'TASK_REVIEWED', entityType: 'TaskAssignment', entityId: assignmentId, metadata: { taskId: existing!.taskId, decision: input.decision, notes: input.notes ?? null } },
+      });
     });
+    const updated = await this.database.taskAssignment.findUniqueOrThrow({ where: { id: assignmentId }, include: assignmentInclude });
 
     this.events.emitTaskReviewed(
       this.buildPayload(existing!.task, context, `Task ${input.decision.toLowerCase()}: ${existing!.task.title}`, {

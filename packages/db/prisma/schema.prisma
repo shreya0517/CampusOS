@@ -946,6 +946,8 @@ model TaskAssignment {
   submissionContent String?
   reviewedAt        DateTime?
   reviewedByUserId  String?
+  /// The reviewer's feedback. Kept apart from notes, which hold the assigner's instructions.
+  reviewNotes       String?
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
   college           College    @relation(fields: [collegeId], references: [id], onDelete: Cascade)
