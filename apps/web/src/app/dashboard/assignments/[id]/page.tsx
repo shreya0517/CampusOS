@@ -3,6 +3,7 @@
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
+import { useAuth } from '@/components/auth-provider';
 import { ErrorState, Skeleton } from '@/components/feedback/states';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -25,9 +26,14 @@ export default function AssignmentDetailPage() {
   const router = useRouter();
   const params = useParams();
   const id = typeof params?.id === 'string' ? params.id : Array.isArray(params?.id) ? params.id[0] : '';
+  const { primaryRole } = useAuth();
+  // Only staff can list everyone's submissions; a student sees their own work on the assignment itself.
+  const canSeeSubmissions = primaryRole === 'Admin' || primaryRole === 'HOD' || primaryRole === 'Faculty';
+  const isStudent = primaryRole === 'Student';
 
   const [assignment, setAssignment] = useState<Assignment | null>(null);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [submissionsError, setSubmissionsError] = useState<string | null>(null);
   const [mySubmission, setMySubmission] = useState<Submission | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -57,12 +63,14 @@ export default function AssignmentDetailPage() {
         setFileKey(data.mySubmission.fileKey ?? '');
       }
 
-      // Try fetching faculty/admin submissions list (will throw 403 if user is a student)
-      try {
-        const subs = await listSubmissions(id);
-        setSubmissions(subs);
-      } catch {
-        // Expected for students
+      if (canSeeSubmissions) {
+        // A failed submissions list shouldn't hide the assignment that did load, so it gets its own error.
+        try {
+          setSubmissions(await listSubmissions(id));
+          setSubmissionsError(null);
+        } catch (err) {
+          setSubmissionsError(err instanceof Error ? err.message : 'Could not load submissions.');
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load assignment details.');
@@ -73,7 +81,7 @@ export default function AssignmentDetailPage() {
 
   useEffect(() => {
     void load();
-  }, [id]);
+  }, [id, canSeeSubmissions]);
 
   const handleSubmitWork = async (e: FormEvent) => {
     e.preventDefault();
@@ -154,7 +162,7 @@ export default function AssignmentDetailPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="md:col-span-2">
+        <Card className={isStudent ? 'md:col-span-2' : 'md:col-span-3'}>
           <CardHeader>
             <CardTitle>Assignment Details</CardTitle>
           </CardHeader>
@@ -184,7 +192,8 @@ export default function AssignmentDetailPage() {
           </CardContent>
         </Card>
 
-        {/* Student Submission Card */}
+        {/* Student Submission Card: only a student hands in work, so staff don't get a form the API refuses. */}
+        {isStudent && (
         <Card>
           <CardHeader>
             <CardTitle>Your Submission</CardTitle>
@@ -251,9 +260,11 @@ export default function AssignmentDetailPage() {
             )}
           </CardContent>
         </Card>
+        )}
       </div>
 
       {/* Submissions Section for Faculty / HOD / Admin */}
+      {submissionsError && <ErrorState message={submissionsError} onRetry={() => void load()} />}
       {submissions.length > 0 && (
         <Card className="mt-4">
           <CardHeader>

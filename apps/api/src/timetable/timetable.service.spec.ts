@@ -330,3 +330,17 @@ describe('TimetableService HOD and write rules', () => {
     expect(database.timetable.delete).not.toHaveBeenCalled();
   });
 });
+
+describe('timetable input', () => {
+  it('turns bad input into a 400, not a 500', () => {
+    const valid = { classId: 'cls-1', roomId: 'room-1', dayOfWeek: 1, startsAt: '09:00', endsAt: '10:00' };
+    for (const body of [undefined, {}, { ...valid, classId: ' ' }, { ...valid, roomId: 5 }, { ...valid, dayOfWeek: 7 }, { ...valid, startsAt: '' }, { ...valid, endsAt: undefined }]) {
+      expect(() => parseCreateTimetableDto(body)).toThrow(BadRequestException);
+    }
+    for (const query of [{ page: 'abc' }, { page: '0' }, { pageSize: '500' }, { pageSize: '1.5' }]) {
+      expect(() => parseTimetableListQuery(query)).toThrow(BadRequestException);
+    }
+    expect(parseCreateTimetableDto(valid)).toEqual(valid);
+    expect(parseTimetableListQuery({})).toMatchObject({ page: 1, pageSize: 50 });
+  });
+});
