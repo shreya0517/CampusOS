@@ -37,8 +37,11 @@ export type StudentRecord = {
 };
 
 export const listSections = (): Promise<SectionOption[]> => authenticatedRequest('/students/sections');
-export const createStudent = (input: { studentCode: string; firstName: string; lastName: string; dateOfBirth?: string; sectionId: string }): Promise<Student> =>
+/** Adds a student; with an email it also creates their sign-in account and returns a temporary password once. */
+export const createStudent = (input: { studentCode: string; firstName: string; lastName: string; dateOfBirth?: string; sectionId: string; email?: string }): Promise<Student & { temporaryPassword?: string }> =>
   authenticatedRequest('/students', { method: 'POST', body: JSON.stringify(input) });
+export const createStudentAccount = (id: string, email: string): Promise<Student & { temporaryPassword: string }> =>
+  authenticatedRequest(`/students/${id}/account`, { method: 'POST', body: JSON.stringify({ email }) });
 export const getStudentRecord = (id: string): Promise<StudentRecord> => authenticatedRequest(`/students/${id}/record`);
 export const setStudentAccountStatus = (id: string, status: 'ACTIVE' | 'INACTIVE'): Promise<Student> =>
   authenticatedRequest(`/students/${id}/account`, { method: 'PUT', body: JSON.stringify({ status }) });

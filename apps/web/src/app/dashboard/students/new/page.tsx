@@ -3,12 +3,13 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+import { TemporaryPasswordNotice } from '@/components/accounts/temporary-password-notice';
 import { ErrorState, Skeleton } from '@/components/feedback/states';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input, Select } from '@/components/ui/form-field';
 import { createStudent, listSections } from '@/lib/student-api';
-import type { SectionOption } from '@/lib/student-api';
+import type { SectionOption, Student } from '@/lib/student-api';
 
 export default function NewStudentPage() {
   const router = useRouter();
@@ -20,6 +21,7 @@ export default function NewStudentPage() {
   const [sectionId, setSectionId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [created, setCreated] = useState<(Student & { temporaryPassword?: string }) | null>(null);
 
   const load = () => {
     setLoadError(null);
@@ -41,6 +43,28 @@ export default function NewStudentPage() {
     [sections, courseId],
   );
   const sectionChoices = useMemo(() => (sections ?? []).filter((section) => section.semester.id === semesterId), [sections, semesterId]);
+
+  if (created) {
+    return (
+      <div className="grid max-w-3xl gap-6">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Student added</h1>
+          <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+            {created.firstName} {created.lastName} ({created.studentCode})
+          </p>
+        </div>
+        {created.temporaryPassword && created.account && <TemporaryPasswordNotice email={created.account.email} password={created.temporaryPassword} who="the student" />}
+        <div className="flex flex-wrap gap-2">
+          <Link href={`/dashboard/students/${created.id}`}>
+            <Button>Open record</Button>
+          </Link>
+          <Button variant="outline" onClick={() => setCreated(null)}>
+            Add another
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="grid max-w-3xl gap-6">
@@ -71,8 +95,15 @@ export default function NewStudentPage() {
                   lastName: String(data.get('lastName')).trim(),
                   dateOfBirth: String(data.get('dateOfBirth') || '') || undefined,
                   sectionId,
+                  email: String(data.get('email') ?? '').trim() || undefined,
                 });
-                router.push(`/dashboard/students/${student.id}`);
+                // A new account's temporary password is shown once, so stay here to show it; otherwise open the record.
+                if (student.temporaryPassword) {
+                  setCreated(student);
+                  setSaving(false);
+                } else {
+                  router.push(`/dashboard/students/${student.id}`);
+                }
               } catch (reason) {
                 setError(reason instanceof Error ? reason.message : 'The student could not be added.');
                 setSaving(false);
@@ -154,6 +185,13 @@ export default function NewStudentPage() {
                   </option>
                 ))}
               </Select>
+            </CardContent>
+            <CardHeader className="border-t">
+              <CardTitle>Sign-in account</CardTitle>
+              <CardDescription>With an email, a student account is created and a temporary password is shown once on the next screen. Leave it empty to add the record only.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Input label="College email" name="email" type="email" placeholder="name@college.edu" autoComplete="off" />
             </CardContent>
             {error && (
               <p role="alert" className="mx-5 mb-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">

@@ -2,7 +2,8 @@ import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundExce
 import { EnrollmentStatus, UserStatus } from '@prisma/client';
 import { DatabaseService } from '../database.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
-import type { AccountStatusDto, CreateStudentDto, EnrollmentDto, StudentListQuery, UpdateMyContactDto, UpdateStudentDto } from './students.dto';
+import type { AccountStatusDto, CreateStudentDto, EnrollmentDto, StudentAccountDto, StudentListQuery, UpdateMyContactDto, UpdateStudentDto } from './students.dto';
+import { accountConflict, createAccountWithRole, generateTemporaryPassword } from '../auth/accounts';
 
 /** The CSV export stops at this many students; filter the list to export more. */
 export const STUDENT_EXPORT_LIMIT = 10_000;
@@ -19,9 +20,41 @@ export class StudentsService {
     if (!context.roles.includes('ADMIN')) throw denied();
     this.assertManager(context);
     const section = await this.sectionForContext(input.sectionId, context);
+    // With an email the student's STUDENT sign-in account is created too, and a temporary password returned once.
+    const temporaryPassword = input.email ? generateTemporaryPassword() : undefined;
     try {
-      return await this.database.student.create({ data: { collegeId: context.collegeId, studentCode: input.studentCode, firstName: input.firstName, lastName: input.lastName, dateOfBirth: input.dateOfBirth, enrollments: { create: { sectionId: section.id } } }, include: studentInclude });
-    } catch (error) { if (isUnique(error)) throw new ConflictException({ code: 'STUDENT_EXISTS', message: 'Student code already exists.' }); throw error; }
+      const student = await this.database.$transaction(async (tx) => {
+        const userId = input.email
+          ? await createAccountWithRole(tx, { collegeId: context.collegeId, email: input.email, displayName: `${input.firstName} ${input.lastName}`, roleName: 'STUDENT', temporaryPassword: temporaryPassword as string })
+          : null;
+        const created = await tx.student.create({
+          data: { collegeId: context.collegeId, userId, studentCode: input.studentCode, firstName: input.firstName, lastName: input.lastName, dateOfBirth: input.dateOfBirth, enrollments: { create: { sectionId: section.id } } },
+          include: studentAccountInclude,
+        });
+        if (userId) await tx.auditLog.create({ data: { collegeId: context.collegeId, actorId: context.userId, action: 'STUDENT_ACCOUNT_CREATED', entityType: 'Student', entityId: created.id } });
+        return created;
+      });
+      return { ...this.withAccount(student, context), ...(temporaryPassword ? { temporaryPassword } : {}) };
+    } catch (error) { if (isUnique(error)) throw accountConflict(error, { code: 'STUDENT_EXISTS', message: 'Student code already exists.' }); throw error; }
+  }
+
+  /** Admin gives a student without a sign-in account one, returning a temporary password once. */
+  async createAccount(id: string, input: StudentAccountDto, context: AuthorizationContext) {
+    if (!context.roles.includes('ADMIN')) throw denied();
+    const student = await this.database.student.findFirst({ where: { id, collegeId: context.collegeId }, select: { id: true, userId: true, firstName: true, lastName: true } });
+    if (!student) throw missing();
+    if (student.userId) throw new ConflictException({ code: 'ACCOUNT_EXISTS', message: 'This student already has a sign-in account.' });
+    const temporaryPassword = generateTemporaryPassword();
+    try {
+      await this.database.$transaction(async (tx) => {
+        const userId = await createAccountWithRole(tx, { collegeId: context.collegeId, email: input.email, displayName: `${student.firstName} ${student.lastName}`, roleName: 'STUDENT', temporaryPassword });
+        // Only links if the record still has no account, so two concurrent requests can't both attach one.
+        const linked = await tx.student.updateMany({ where: { id, collegeId: context.collegeId, userId: null }, data: { userId } });
+        if (linked.count !== 1) throw new ConflictException({ code: 'ACCOUNT_EXISTS', message: 'This student already has a sign-in account.' });
+        await tx.auditLog.create({ data: { collegeId: context.collegeId, actorId: context.userId, action: 'STUDENT_ACCOUNT_CREATED', entityType: 'Student', entityId: id } });
+      });
+    } catch (error) { if (isUnique(error)) throw accountConflict(error, { code: 'ACCOUNT_EXISTS', message: 'This student already has a sign-in account.' }); throw error; }
+    return { ...(await this.get(id, context)), temporaryPassword };
   }
 
   async list(query: StudentListQuery, context: AuthorizationContext) {

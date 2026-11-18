@@ -10,8 +10,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input, Select } from '@/components/ui/form-field';
 import { Dialog } from '@/components/ui/interactive';
 import { AccountBadge } from '@/components/students/account-badge';
+import { TemporaryPasswordNotice } from '@/components/accounts/temporary-password-notice';
 import { StudentRecordSections } from '@/components/students/student-record-sections';
-import { getStudent, getStudentRecord, setStudentAccountStatus, updateEnrollment, updateStudent } from '@/lib/student-api';
+import { createStudentAccount, getStudent, getStudentRecord, setStudentAccountStatus, updateEnrollment, updateStudent } from '@/lib/student-api';
 import type { Student, StudentRecord } from '@/lib/student-api';
 
 export default function StudentDetailsPage() {
@@ -29,6 +30,7 @@ export default function StudentDetailsPage() {
   const [saving, setSaving] = useState(false);
   const [confirmingAccount, setConfirmingAccount] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
+  const [issued, setIssued] = useState<{ email: string; password: string } | null>(null);
 
   const load = async () => {
     try {
@@ -98,6 +100,38 @@ export default function StudentDetailsPage() {
           <p role="alert" className="mt-3 text-sm text-[hsl(var(--destructive))]">
             {accountError}
           </p>
+        )}
+        {issued && (
+          <div className="mt-4">
+            <TemporaryPasswordNotice email={issued.email} password={issued.password} who="the student" />
+          </div>
+        )}
+        {isAdmin && student.account === null && !issued && (
+          <form
+            className="mt-4 flex flex-wrap items-end gap-3 rounded-[var(--radius)] border bg-[hsl(var(--card))] p-4"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              const email = String(new FormData(event.currentTarget).get('email') ?? '').trim();
+              setSaving(true);
+              setAccountError(null);
+              try {
+                const result = await createStudentAccount(student.id, email);
+                setStudent(result);
+                setIssued({ email: result.account?.email ?? email, password: result.temporaryPassword });
+              } catch (reason) {
+                setAccountError(reason instanceof Error ? reason.message : 'The account could not be created.');
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            <div className="min-w-[16rem] flex-1">
+              <Input label="This student has no sign-in account. College email" name="email" type="email" required autoComplete="off" />
+            </div>
+            <Button type="submit" loading={saving}>
+              Create account
+            </Button>
+          </form>
         )}
       </div>
 

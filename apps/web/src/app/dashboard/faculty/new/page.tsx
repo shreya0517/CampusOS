@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { TemporaryPasswordNotice } from '@/components/faculty/temporary-password-notice';
+import { TemporaryPasswordNotice } from '@/components/accounts/temporary-password-notice';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input, Select } from '@/components/ui/form-field';
@@ -31,7 +31,7 @@ export default function NewFacultyPage() {
           </p>
         </div>
         {created.temporaryPassword && created.account ? (
-          <TemporaryPasswordNotice email={created.account.email} password={created.temporaryPassword} />
+          <TemporaryPasswordNotice email={created.account.email} password={created.temporaryPassword} who="the faculty member" />
         ) : (
           <p className="text-sm text-[hsl(var(--muted-foreground))]">No sign-in account was created. You can add one later from their profile.</p>
         )}

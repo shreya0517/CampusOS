@@ -9,7 +9,8 @@ const student: AuthorizationContext = { userId: 'user-a', collegeId: 'college-a'
 const record = { id: 'student-a', collegeId: 'college-a', userId: 'user-a', studentCode: 'STU-1', firstName: 'Aarav', lastName: 'Mehta', enrollments: [] };
 
 describe('StudentsService', () => {
-  const database = { section: { findFirst: jest.fn() }, student: { create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn(), update: jest.fn() }, enrollment: { upsert: jest.fn() } };
+  const database = { section: { findFirst: jest.fn() }, student: { create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn(), update: jest.fn() }, enrollment: { upsert: jest.fn() }, $transaction: jest.fn() };
+  database.$transaction.mockImplementation((work: (tx: typeof database) => Promise<unknown>) => work(database));
   const service = new StudentsService(database as never);
   beforeEach(() => jest.clearAllMocks());
 
@@ -23,7 +24,8 @@ describe('StudentsService', () => {
   it('allows ADMIN create in its college and scopes its section query by authenticated college', async () => {
     database.section.findFirst.mockResolvedValue({ id: 'section-a', collegeId: 'college-a', semester: { course: { departmentId: 'department-a' } } });
     database.student.create.mockResolvedValue(record);
-    await expect(service.create({ studentCode: 'STU-1', firstName: 'Aarav', lastName: 'Mehta', sectionId: 'section-a' }, admin)).resolves.toEqual(record);
+    // Without an email no account is created, so the response says account: null and has no temporary password.
+    await expect(service.create({ studentCode: 'STU-1', firstName: 'Aarav', lastName: 'Mehta', sectionId: 'section-a' }, admin)).resolves.toEqual({ ...record, account: null });
     expect(database.section.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'section-a', collegeId: 'college-a' } }));
   });
 

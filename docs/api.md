@@ -243,3 +243,9 @@ The actor is never notified about their own action. Finding the recipients and s
 - Both moves are conditional on the current status, so a repeated or parallel request gets 409 instead of overwriting the time. Both are audited (VISITOR_CHECKED_IN, VISITOR_CHECKED_OUT).
 - GET /api/v1/visitors accepts `on=YYYY-MM-DD` to list visitors expected that day, alongside `status`.
 - GET /api/v1/visitors/my returns a plain list (not a page) of the caller's registrations.
+
+## Student Sign-in Accounts
+
+- POST /api/v1/students accepts an optional `email`. With it, the student's STUDENT sign-in account is created too (marked verified, as Admin vouches for it), and `temporaryPassword` is returned once; it is never stored in plain text or shown again. The record, account and role are created together or not at all. A taken email returns 409 ACCOUNT_EXISTS, a taken student code 409 STUDENT_EXISTS.
+- POST /api/v1/students/:id/account: ADMIN only, body `{ "email": string }`. Creates an account for a student who has none and returns `temporaryPassword` once; 409 ACCOUNT_EXISTS if they already have one.
+- Both are audited as STUDENT_ACCOUNT_CREATED. The student signs in with the temporary password and changes it under Settings. Faculty accounts work the same way, and both share `auth/accounts.ts`.
