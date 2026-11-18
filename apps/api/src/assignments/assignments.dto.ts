@@ -25,13 +25,15 @@ export type AssignmentListQuery = {
 
 export type SubmitAssignmentDto = {
   fileKey?: string;
-  status?: SubmissionStatus;
+  /** DRAFT saves without handing in; leaving it out, or SUBMITTED, hands the work in. */
+  status?: 'DRAFT' | 'SUBMITTED';
 };
 
 export type GradeSubmissionDto = {
   marksAwarded: number;
   feedback?: string;
-  status?: SubmissionStatus;
+  /** GRADED (the default) or RETURNED for the student to hand in again. */
+  status?: 'GRADED' | 'RETURNED';
 };
 
 type Body = Record<string, unknown>;
@@ -57,7 +59,10 @@ const integer = (v: unknown, fallback: number, max: number): number => {
   return Number.isInteger(n) && n > 0 && n <= max ? n : invalid();
 };
 
-const VALID_SUBMISSION_STATUSES = Object.values(SubmissionStatus) as string[];
+/** A student saves a draft or hands work in; whether it is late is worked out from the due date, never chosen. */
+const STUDENT_STATUSES: string[] = [SubmissionStatus.DRAFT, SubmissionStatus.SUBMITTED];
+/** Staff grade work, or return it so the student can hand it in again. */
+const GRADING_STATUSES: string[] = [SubmissionStatus.GRADED, SubmissionStatus.RETURNED];
 
 export const parseCreateAssignmentDto = (v: unknown): CreateAssignmentDto => {
   const b = object(v);
@@ -97,20 +102,20 @@ export const parseAssignmentListQuery = (v: unknown): AssignmentListQuery => {
 export const parseSubmitAssignmentDto = (v: unknown): SubmitAssignmentDto => {
   const b = object(v);
   const status = b.status === undefined ? undefined : string(b.status);
-  if (status !== undefined && !VALID_SUBMISSION_STATUSES.includes(status)) invalid();
+  if (status !== undefined && !STUDENT_STATUSES.includes(status)) invalid();
   return {
     fileKey: optionalString(b.fileKey),
-    status: status as SubmissionStatus | undefined,
+    status: status as SubmitAssignmentDto['status'],
   };
 };
 
 export const parseGradeSubmissionDto = (v: unknown): GradeSubmissionDto => {
   const b = object(v);
   const status = b.status === undefined ? undefined : string(b.status);
-  if (status !== undefined && !VALID_SUBMISSION_STATUSES.includes(status)) invalid();
+  if (status !== undefined && !GRADING_STATUSES.includes(status)) invalid();
   return {
     marksAwarded: number(b.marksAwarded, 0),
     feedback: optionalString(b.feedback),
-    status: status as SubmissionStatus | undefined,
+    status: status as GradeSubmissionDto['status'],
   };
 };

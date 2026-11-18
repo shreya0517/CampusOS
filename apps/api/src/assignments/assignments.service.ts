@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SubmissionStatus } from '@prisma/client';
 import { DatabaseService } from '../database.service';
@@ -17,6 +17,12 @@ const denied = (): never => {
 const missing = (): never => {
   throw new NotFoundException({ code: 'ASSIGNMENT_NOT_FOUND', message: 'Assignment was not found.' });
 };
+/** Handed-in work a teacher can grade, or grade again. */
+const GRADABLE: SubmissionStatus[] = [SubmissionStatus.SUBMITTED, SubmissionStatus.LATE, SubmissionStatus.GRADED, SubmissionStatus.RETURNED];
+const submissionChanged = (): never => {
+  throw new ConflictException({ code: 'SUBMISSION_CHANGED', message: 'This submission changed in the meantime. Reload and try again.' });
+};
+const isUniqueViolation = (error: unknown): boolean => typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'P2002';
 const submissionMissing = (): never => {
   throw new NotFoundException({ code: 'SUBMISSION_NOT_FOUND', message: 'Submission was not found.' });
 };
@@ -225,31 +231,43 @@ export class AssignmentsService {
 
     const now = new Date();
     const isLate = assignment.dueAt && now > assignment.dueAt;
-    const computedStatus = input.status ?? (isLate ? SubmissionStatus.LATE : SubmissionStatus.SUBMITTED);
+    // The student only chooses between a draft and handing in; whether it is late comes from the due date.
+    const computedStatus = input.status === 'DRAFT' ? SubmissionStatus.DRAFT : isLate ? SubmissionStatus.LATE : SubmissionStatus.SUBMITTED;
+    const submittedAt = computedStatus === SubmissionStatus.DRAFT ? null : now;
+    const where = { collegeId: context.collegeId, assignmentId, studentId: studentProfile!.id };
 
-    const submission = await this.database.submission.upsert({
-      where: {
-        collegeId_assignmentId_studentId: {
-          collegeId: context.collegeId,
-          assignmentId,
-          studentId: studentProfile!.id,
+    const existing = await this.database.submission.findFirst({ where, select: { id: true, status: true } });
+    // Graded work is final: the teacher returns it if it needs changes.
+    if (existing?.status === SubmissionStatus.GRADED) {
+      throw new ConflictException({ code: 'SUBMISSION_GRADED', message: 'This work has been graded. Ask your teacher to return it if it needs changes.' });
+    }
+    // Work that was handed in isn't taken back to a draft.
+    if (existing && computedStatus === SubmissionStatus.DRAFT && existing.status !== SubmissionStatus.DRAFT) {
+      throw new ConflictException({ code: 'ALREADY_SUBMITTED', message: 'This work has already been handed in.' });
+    }
+
+    if (existing) {
+      // Only if nothing changed it since it was read, so a resubmission can't overwrite a grade given in the meantime.
+      // Handing in returned work clears the old marks, since the new work needs grading; the feedback stays.
+      const written = await this.database.submission.updateMany({
+        where: { id: existing.id, collegeId: context.collegeId, status: existing.status },
+        data: {
+          ...(input.fileKey !== undefined ? { fileKey: input.fileKey } : {}),
+          status: computedStatus,
+          submittedAt,
+          ...(existing.status === SubmissionStatus.RETURNED ? { marksAwarded: null } : {}),
         },
-      },
-      create: {
-        collegeId: context.collegeId,
-        assignmentId,
-        studentId: studentProfile!.id,
-        fileKey: input.fileKey ?? null,
-        status: computedStatus,
-        submittedAt: now,
-      },
-      update: {
-        fileKey: input.fileKey ?? undefined,
-        status: computedStatus,
-        submittedAt: now,
-      },
-      include: submissionInclude,
-    });
+      });
+      if (written.count !== 1) submissionChanged();
+    } else {
+      try {
+        await this.database.submission.create({ data: { ...where, fileKey: input.fileKey ?? null, status: computedStatus, submittedAt } });
+      } catch (error) {
+        if (isUniqueViolation(error)) submissionChanged();
+        throw error;
+      }
+    }
+    const submission = await this.database.submission.findUniqueOrThrow({ where: { collegeId_assignmentId_studentId: where }, include: submissionInclude });
     // A saved draft isn't handed in yet, so only a real submission reaches the faculty member.
     if (computedStatus !== SubmissionStatus.DRAFT) {
       await this.notifications?.safely(async (notifications) => {
@@ -291,16 +309,22 @@ export class AssignmentsService {
       where: { id: submissionId, collegeId: context.collegeId, assignmentId },
     });
     if (!existing) submissionMissing();
+    // Only handed-in work is graded (or graded again); a draft hasn't been handed in.
+    if (!GRADABLE.includes(existing!.status)) {
+      throw new ConflictException({ code: 'NOT_SUBMITTED', message: 'Only work that has been handed in can be graded.' });
+    }
 
-    const graded = await this.database.submission.update({
-      where: { collegeId_id: { collegeId: context.collegeId, id: submissionId } },
+    // Only if the student didn't change it since it was read.
+    const written = await this.database.submission.updateMany({
+      where: { id: submissionId, collegeId: context.collegeId, status: existing!.status },
       data: {
         marksAwarded: input.marksAwarded,
         feedback: input.feedback,
         status: input.status ?? SubmissionStatus.GRADED,
       },
-      include: submissionInclude,
     });
+    if (written.count !== 1) submissionChanged();
+    const graded = await this.database.submission.findUniqueOrThrow({ where: { collegeId_id: { collegeId: context.collegeId, id: submissionId } }, include: submissionInclude });
     await this.notifications?.safely(async (notifications) => {
       const returned = (input.status ?? SubmissionStatus.GRADED) === SubmissionStatus.RETURNED;
       const students = await notifications.studentUsers(context.collegeId, [existing!.studentId]);

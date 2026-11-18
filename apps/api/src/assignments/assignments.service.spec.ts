@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { SubmissionStatus } from '@prisma/client';
 import { AssignmentsService } from './assignments.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
@@ -48,7 +48,15 @@ describe('AssignmentsService', () => {
     faculty: { findFirst: jest.fn() },
     student: { findFirst: jest.fn() },
     assignment: { create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn(), update: jest.fn(), delete: jest.fn() },
-    submission: { upsert: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
+    submission: {
+      upsert: jest.fn(),
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+      update: jest.fn(),
+      create: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      findUniqueOrThrow: jest.fn().mockResolvedValue(mockSubmission),
+    },
   };
   const service = new AssignmentsService(database as never);
 
@@ -88,20 +96,75 @@ describe('AssignmentsService', () => {
   it('allows STUDENT to submit work', async () => {
     database.student.findFirst.mockResolvedValue(mockStudent);
     database.assignment.findFirst.mockResolvedValue(mockAssignment);
-    database.submission.upsert.mockResolvedValue(mockSubmission);
+    database.submission.findFirst.mockResolvedValue(null);
 
     const result = await service.submitAssignment('ass-1', { fileKey: 'test.pdf' }, student);
     expect(result).toEqual(mockSubmission);
+    expect(database.submission.create).toHaveBeenCalledWith({
+      data: { collegeId: 'col-a', assignmentId: 'ass-1', studentId: 'stu-1', fileKey: 'test.pdf', status: SubmissionStatus.SUBMITTED, submittedAt: expect.any(Date) },
+    });
+  });
+
+  it('never lets a student choose graded, returned or late', () => {
+    for (const status of ['GRADED', 'RETURNED', 'LATE']) expect(() => parseSubmitAssignmentDto({ fileKey: 'f', status })).toThrow(BadRequestException);
+    expect(parseSubmitAssignmentDto({ status: 'DRAFT' }).status).toBe('DRAFT');
+    for (const status of ['DRAFT', 'SUBMITTED', 'LATE']) expect(() => parseGradeSubmissionDto({ marksAwarded: 5, status })).toThrow(BadRequestException);
+    expect(parseGradeSubmissionDto({ marksAwarded: 5, status: 'RETURNED' }).status).toBe('RETURNED');
+  });
+
+  it('marks work late from the due date, whatever the student sends', async () => {
+    database.student.findFirst.mockResolvedValue(mockStudent);
+    database.assignment.findFirst.mockResolvedValue({ ...mockAssignment, dueAt: new Date('2020-01-01') });
+    database.submission.findFirst.mockResolvedValue(null);
+    await service.submitAssignment('ass-1', { fileKey: 'late.pdf', status: 'SUBMITTED' }, student);
+    expect(database.submission.create).toHaveBeenCalledWith({ data: expect.objectContaining({ status: SubmissionStatus.LATE }) });
+  });
+
+  it('keeps graded work final and handed-in work out of drafts', async () => {
+    database.student.findFirst.mockResolvedValue(mockStudent);
+    database.assignment.findFirst.mockResolvedValue(mockAssignment);
+    database.submission.findFirst.mockResolvedValue({ id: 'sub-1', status: SubmissionStatus.GRADED });
+    await expect(service.submitAssignment('ass-1', { fileKey: 'v2.pdf' }, student)).rejects.toMatchObject({ response: { code: 'SUBMISSION_GRADED' } });
+    database.submission.findFirst.mockResolvedValue({ id: 'sub-1', status: SubmissionStatus.SUBMITTED });
+    await expect(service.submitAssignment('ass-1', { fileKey: 'v2.pdf', status: 'DRAFT' }, student)).rejects.toMatchObject({ response: { code: 'ALREADY_SUBMITTED' } });
+    expect(database.submission.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('clears the old marks when returned work is handed in again, and refuses if it was graded meanwhile', async () => {
+    database.student.findFirst.mockResolvedValue(mockStudent);
+    database.assignment.findFirst.mockResolvedValue(mockAssignment);
+    database.submission.findFirst.mockResolvedValue({ id: 'sub-1', status: SubmissionStatus.RETURNED });
+    await service.submitAssignment('ass-1', { fileKey: 'v2.pdf' }, student);
+    expect(database.submission.updateMany).toHaveBeenCalledWith({
+      where: { id: 'sub-1', collegeId: 'col-a', status: SubmissionStatus.RETURNED },
+      data: { fileKey: 'v2.pdf', status: SubmissionStatus.SUBMITTED, submittedAt: expect.any(Date), marksAwarded: null },
+    });
+    database.submission.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(service.submitAssignment('ass-1', { fileKey: 'v3.pdf' }, student)).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('allows FACULTY/HOD to grade submission', async () => {
     database.assignment.findFirst.mockResolvedValue(mockAssignment);
     database.class.findFirst.mockResolvedValue(mockClass);
     database.submission.findFirst.mockResolvedValue(mockSubmission);
-    database.submission.update.mockResolvedValue({ ...mockSubmission, status: SubmissionStatus.GRADED, marksAwarded: 90 });
+    database.submission.findUniqueOrThrow.mockResolvedValueOnce({ ...mockSubmission, status: SubmissionStatus.GRADED, marksAwarded: 90 });
 
     const result = await service.gradeSubmission('ass-1', 'sub-1', { marksAwarded: 90, feedback: 'Good' }, faculty);
     expect(result.marksAwarded).toBe(90);
+    expect(database.submission.updateMany).toHaveBeenCalledWith({
+      where: { id: 'sub-1', collegeId: 'col-a', status: SubmissionStatus.SUBMITTED },
+      data: { marksAwarded: 90, feedback: 'Good', status: SubmissionStatus.GRADED },
+    });
+  });
+
+  it('grades only handed-in work, and not over a change made meanwhile', async () => {
+    database.assignment.findFirst.mockResolvedValue(mockAssignment);
+    database.class.findFirst.mockResolvedValue(mockClass);
+    database.submission.findFirst.mockResolvedValueOnce({ ...mockSubmission, status: SubmissionStatus.DRAFT });
+    await expect(service.gradeSubmission('ass-1', 'sub-1', { marksAwarded: 5 }, faculty)).rejects.toMatchObject({ response: { code: 'NOT_SUBMITTED' } });
+    database.submission.findFirst.mockResolvedValueOnce(mockSubmission);
+    database.submission.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(service.gradeSubmission('ass-1', 'sub-1', { marksAwarded: 5 }, faculty)).rejects.toMatchObject({ response: { code: 'SUBMISSION_CHANGED' } });
   });
 
   it('rejects grade exceeding maxMarks', async () => {
