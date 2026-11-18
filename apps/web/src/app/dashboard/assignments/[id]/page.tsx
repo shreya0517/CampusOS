@@ -33,6 +33,7 @@ export default function AssignmentDetailPage() {
 
   const [assignment, setAssignment] = useState<Assignment | null>(null);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [submissionsError, setSubmissionsError] = useState<string | null>(null);
   const [mySubmission, setMySubmission] = useState<Submission | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -62,7 +63,15 @@ export default function AssignmentDetailPage() {
         setFileKey(data.mySubmission.fileKey ?? '');
       }
 
-      if (canSeeSubmissions) setSubmissions(await listSubmissions(id));
+      if (canSeeSubmissions) {
+        // A failed submissions list shouldn't hide the assignment that did load, so it gets its own error.
+        try {
+          setSubmissions(await listSubmissions(id));
+          setSubmissionsError(null);
+        } catch (err) {
+          setSubmissionsError(err instanceof Error ? err.message : 'Could not load submissions.');
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load assignment details.');
     } finally {
@@ -255,6 +264,7 @@ export default function AssignmentDetailPage() {
       </div>
 
       {/* Submissions Section for Faculty / HOD / Admin */}
+      {submissionsError && <ErrorState message={submissionsError} onRetry={() => void load()} />}
       {submissions.length > 0 && (
         <Card className="mt-4">
           <CardHeader>
