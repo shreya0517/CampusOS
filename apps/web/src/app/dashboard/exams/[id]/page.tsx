@@ -8,6 +8,7 @@ import { EmptyState, ErrorState, Skeleton } from '@/components/feedback/states';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/form-field';
+import { Dialog } from '@/components/ui/interactive';
 import { Table, TableCell, TableHead } from '@/components/ui/table';
 import {
   addExamSubject,
@@ -33,6 +34,14 @@ const MARKS_BADGE: Record<'DRAFT' | 'SUBMITTED' | 'APPROVED', string> = {
   APPROVED: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200',
 };
 
+type PendingAction = { kind: 'delete-exam' } | { kind: 'remove-paper'; examSubjectId: string } | { kind: 'publish' };
+
+const PENDING_COPY: Record<PendingAction['kind'], { title: string; description: string; confirm: string }> = {
+  'delete-exam': { title: 'Delete this exam?', description: 'The exam and its scheduled papers are removed. This cannot be undone.', confirm: 'Delete exam' },
+  'remove-paper': { title: 'Remove this paper?', description: 'The paper is taken off this exam’s schedule.', confirm: 'Remove paper' },
+  publish: { title: 'Calculate and publish results?', description: 'Totals and percentages are worked out from the approved marks, and students can see their results straight away.', confirm: 'Publish results' },
+};
+
 export default function ExamDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -51,6 +60,11 @@ export default function ExamDetailPage() {
   const [addingSubject, setAddingSubject] = useState(false);
   const [calcLoading, setCalcLoading] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState(false);
+  // Destructive or final actions wait for a yes in the app's own dialog; outcomes show on the page, not in browser pop-ups.
+  const [pending, setPending] = useState<PendingAction | null>(null);
+  const [pendingError, setPendingError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const loadData = async () => {
     setLoading(true);
     setError(null);
@@ -76,29 +90,22 @@ export default function ExamDetailPage() {
   const handleStatusChange = async (newStatus: ExamStatus) => {
     if (!exam) return;
     setStatusUpdating(true);
+    setActionError(null);
     try {
       const updated = await updateExam(exam.id, { status: newStatus });
       setExam((prev) => (prev ? { ...prev, status: updated.status } : null));
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to update exam status.');
+      setActionError(err instanceof Error ? err.message : 'Failed to update exam status.');
     } finally {
       setStatusUpdating(false);
     }
   };
 
-  const handleDeleteExam = async () => {
-    if (!exam || !confirm(`Are you sure you want to delete "${exam.name}"?`)) return;
-    try {
-      await deleteExam(exam.id);
-      router.push('/dashboard/exams');
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete exam.');
-    }
-  };
 
   const handleAddSubjectSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setAddingSubject(true);
+    setActionError(null);
     const formData = new FormData(e.currentTarget);
     const subjectId = String(formData.get('subjectId') ?? '').trim();
     const semesterId = String(formData.get('semesterId') ?? '').trim();
@@ -112,31 +119,41 @@ export default function ExamDetailPage() {
       setShowAddSubject(false);
       await loadData();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to schedule exam subject.');
+      setActionError(err instanceof Error ? err.message : 'Failed to schedule exam subject.');
     } finally {
       setAddingSubject(false);
     }
   };
 
-  const handleRemoveSubject = async (examSubjectId: string) => {
-    if (!confirm('Remove this scheduled subject paper?')) return;
-    try {
-      await removeExamSubject(id, examSubjectId);
-      await loadData();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to remove scheduled subject.');
-    }
+  const ask = (action: PendingAction) => {
+    setPendingError(null);
+    setNotice(null);
+    setActionError(null);
+    setPending(action);
   };
 
-  const handlePublishResults = async () => {
-    if (!confirm('Calculate total marks, percentages, and publish student results for this exam?')) return;
+  /** Runs the action the user just confirmed. A failure stays in the dialog so they can read it and try again. */
+  const runPending = async () => {
+    if (!pending || !exam) return;
     setCalcLoading(true);
+    setPendingError(null);
     try {
-      const res = await calculateAndPublishResults(id);
-      alert(`Results calculated successfully for ${res.processedStudents} students!`);
+      if (pending.kind === 'delete-exam') {
+        await deleteExam(exam.id);
+        router.push('/dashboard/exams');
+        return;
+      }
+      if (pending.kind === 'remove-paper') {
+        await removeExamSubject(id, pending.examSubjectId);
+        setNotice('The paper was removed.');
+      } else {
+        const res = await calculateAndPublishResults(id);
+        setNotice(`Results were calculated and published for ${res.processedStudents} students.`);
+      }
+      setPending(null);
       await loadData();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to calculate results.');
+      setPendingError(err instanceof Error ? err.message : 'That did not work. Please try again.');
     } finally {
       setCalcLoading(false);
     }
@@ -187,14 +204,14 @@ export default function ExamDetailPage() {
                   loading={calcLoading}
                   disabled={!allPapersApproved}
                   title={allPapersApproved ? undefined : 'Every paper’s marks must be approved first'}
-                  onClick={() => void handlePublishResults()}
+                  onClick={() => ask({ kind: 'publish' })}
                 >
                   Calculate & Publish Results
                 </Button>
               )}
 
               {primaryRole === 'Admin' && (
-                <Button variant="destructive" onClick={() => void handleDeleteExam()}>
+                <Button variant="destructive" onClick={() => ask({ kind: 'delete-exam' })}>
                   Delete Exam
                 </Button>
               )}
@@ -202,6 +219,13 @@ export default function ExamDetailPage() {
           )}
         </div>
       </div>
+
+      {notice && (
+        <p role="status" className="rounded-[var(--radius)] border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-100">
+          {notice}
+        </p>
+      )}
+      {actionError && <ErrorState message={actionError} />}
 
       {/* Student View Card if logged-in as Student */}
       {exam.studentResult && (
@@ -309,7 +333,7 @@ export default function ExamDetailPage() {
                           </Link>
                         )}
                         {isAdminOrHOD && sub.marksStatus === 'DRAFT' && (
-                          <Button variant="ghost" className="text-xs text-red-600" onClick={() => void handleRemoveSubject(sub.id)}>
+                          <Button variant="ghost" className="text-xs text-red-600" onClick={() => ask({ kind: 'remove-paper', examSubjectId: sub.id })}>
                             Remove
                           </Button>
                         )}
@@ -379,6 +403,27 @@ export default function ExamDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      <Dialog
+        open={pending !== null}
+        title={pending ? PENDING_COPY[pending.kind].title : ''}
+        description={pending ? PENDING_COPY[pending.kind].description : undefined}
+        onClose={() => setPending(null)}
+      >
+        {pendingError && (
+          <p role="alert" className="mb-3 text-sm text-[hsl(var(--destructive))]">
+            {pendingError}
+          </p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setPending(null)}>
+            Cancel
+          </Button>
+          <Button variant={pending?.kind === 'publish' ? 'primary' : 'destructive'} loading={calcLoading} onClick={() => void runPending()}>
+            {pending ? PENDING_COPY[pending.kind].confirm : ''}
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }

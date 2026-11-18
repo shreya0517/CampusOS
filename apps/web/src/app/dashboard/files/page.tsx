@@ -6,6 +6,7 @@ import { useAuth } from '@/components/auth-provider';
 import { EmptyState, ErrorState, Skeleton } from '@/components/feedback/states';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog } from '@/components/ui/interactive';
 import { Pagination } from '@/components/ui/pagination';
 import { Table, TableCell, TableHead } from '@/components/ui/table';
 import { deleteFile, getFile, listFiles, requestPresignedUpload, uploadFileBinary } from '@/lib/files-api';
@@ -44,6 +45,12 @@ export default function FilesPage() {
   const [visibility, setVisibility] = useState<FileVisibility>('PRIVATE');
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+
+  // A download or delete problem shows on the page, and deleting asks in the app's own dialog, not a browser pop-up.
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<FileItem | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const load = async (p = page, s = search): Promise<void> => {
     setLoading(true);
@@ -107,23 +114,29 @@ export default function FilesPage() {
   };
 
   const handleDownload = async (fileId: string) => {
+    setActionError(null);
     try {
       const item = await getFile(fileId);
       if (item.downloadUrl) {
         window.open(item.downloadUrl, '_blank');
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Could not retrieve download URL.');
+      setActionError(err instanceof Error ? err.message : 'Could not retrieve download URL.');
     }
   };
 
-  const handleDelete = async (fileId: string) => {
-    if (!confirm('Are you sure you want to delete this file?')) return;
+  const handleDelete = async () => {
+    if (!deleting) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
     try {
-      await deleteFile(fileId);
+      await deleteFile(deleting.id);
+      setDeleting(null);
       void load(page, search);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete file.');
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete file.');
+    } finally {
+      setDeleteBusy(false);
     }
   };
 
@@ -188,6 +201,7 @@ export default function FilesPage() {
           </div>
         </CardHeader>
         <CardContent className="grid gap-4">
+          {actionError && <ErrorState message={actionError} />}
           {loading ? (
             <div className="grid gap-2">
               <Skeleton className="h-10 w-full" />
@@ -230,7 +244,7 @@ export default function FilesPage() {
                             Download
                           </Button>
                           {canDelete(f) && (
-                            <Button variant="destructive" onClick={() => void handleDelete(f.id)}>
+                            <Button variant="destructive" onClick={() => { setDeleteError(null); setDeleting(f); }}>
                               Delete
                             </Button>
                           )}
@@ -255,6 +269,27 @@ export default function FilesPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog
+        open={deleting !== null}
+        title="Delete this file?"
+        description={deleting ? `${deleting.originalName} is removed from storage for everyone. This cannot be undone.` : undefined}
+        onClose={() => setDeleting(null)}
+      >
+        {deleteError && (
+          <p role="alert" className="mb-3 text-sm text-[hsl(var(--destructive))]">
+            {deleteError}
+          </p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setDeleting(null)}>
+            Cancel
+          </Button>
+          <Button variant="destructive" loading={deleteBusy} onClick={() => void handleDelete()}>
+            Delete file
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { useAuth } from '@/components/auth-provider';
 import { ErrorState, Skeleton } from '@/components/feedback/states';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog } from '@/components/ui/interactive';
 import { Table, TableCell, TableHead } from '@/components/ui/table';
 import {
   deleteAssignment,
@@ -50,6 +51,11 @@ export default function AssignmentDetailPage() {
   const [feedbackInput, setFeedbackInput] = useState('');
   const [gradingError, setGradingError] = useState<string | null>(null);
   const [gradingSuccess, setGradingSuccess] = useState<string | null>(null);
+
+  // Deleting asks in the app's own dialog, and a failure is shown there, not in a browser pop-up.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const load = async () => {
     if (!id) return;
@@ -100,12 +106,16 @@ export default function AssignmentDetailPage() {
   };
 
   const handleDeleteAssignment = async () => {
-    if (!id || !confirm('Are you sure you want to delete this assignment?')) return;
+    if (!id) return;
+    setDeleting(true);
+    setDeleteError(null);
     try {
       await deleteAssignment(id);
       router.push('/dashboard/assignments');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete assignment.');
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete assignment.');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -155,8 +165,9 @@ export default function AssignmentDetailPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => router.push('/dashboard/assignments')}>Back</Button>
-          {submissions.length > 0 && (
-            <Button variant="destructive" onClick={() => void handleDeleteAssignment()}>Delete</Button>
+          {/* Staff who run the class can delete it, with or without submissions; the API checks the class. */}
+          {canSeeSubmissions && (
+            <Button variant="destructive" onClick={() => { setDeleteError(null); setConfirmingDelete(true); }}>Delete</Button>
           )}
         </div>
       </div>
@@ -344,6 +355,27 @@ export default function AssignmentDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      <Dialog
+        open={confirmingDelete}
+        title="Delete this assignment?"
+        description="The assignment and every submission to it are removed. This cannot be undone."
+        onClose={() => setConfirmingDelete(false)}
+      >
+        {deleteError && (
+          <p role="alert" className="mb-3 text-sm text-[hsl(var(--destructive))]">
+            {deleteError}
+          </p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setConfirmingDelete(false)}>
+            Cancel
+          </Button>
+          <Button variant="destructive" loading={deleting} onClick={() => void handleDeleteAssignment()}>
+            Delete assignment
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }
