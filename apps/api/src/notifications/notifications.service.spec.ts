@@ -85,16 +85,29 @@ describe('NotificationsService', () => {
 describe('notification producers', () => {
   it('tells the announcement audience, but not the author and not for a scheduled one', async () => {
     const notifications = { notify: jest.fn(), usersWithRoles: jest.fn().mockResolvedValue(['user-admin', 'user-stu-1', 'user-stu-2']), safely: (work: (n: unknown) => Promise<void>) => work(notifications) };
-    const created = { id: 'a1', title: 'Holiday', body: 'College closed on Friday.', audience: 'STUDENTS', publishedAt: new Date(Date.now() - 1000) };
+    const created = {
+      id: 'a1',
+      collegeId: 'col-a',
+      authorId: 'user-admin',
+      title: 'Holiday',
+      body: 'College closed on Friday.',
+      audience: 'STUDENTS',
+      departmentId: null,
+      semesterNumber: null,
+      sectionId: null,
+      publishedAt: new Date(Date.now() - 1000),
+    };
     const database = { announcement: { create: jest.fn().mockResolvedValue(created) } };
     const service = new AnnouncementsService(database as never, notifications as never);
-    await service.create({ title: 'Holiday', body: 'College closed on Friday.', audience: 'STUDENTS' } as never, admin);
+    const input = { title: 'Holiday', body: 'College closed on Friday.', audience: 'STUDENTS' as const, category: 'HOLIDAY' as const, target: {} };
+    await service.create(input, admin);
     expect(notifications.usersWithRoles).toHaveBeenCalledWith('col-a', ['STUDENT']);
     expect(notifications.notify).toHaveBeenCalledWith('col-a', ['user-stu-1', 'user-stu-2'], expect.objectContaining({ category: 'ANNOUNCEMENT', title: 'Announcement: Holiday', link: '/dashboard/announcements' }));
 
     notifications.notify.mockClear();
-    database.announcement.create.mockResolvedValue({ ...created, publishedAt: new Date(Date.now() + 86_400_000) });
-    await service.create({ title: 'Later', body: 'Soon', audience: 'ALL' } as never, admin);
+    const later = new Date(Date.now() + 86_400_000);
+    database.announcement.create.mockResolvedValue({ ...created, publishedAt: later });
+    await service.create({ ...input, title: 'Later', publishedAt: later }, admin);
     expect(notifications.notify).not.toHaveBeenCalled();
 
     // A failing recipient lookup doesn't fail the request: the announcement is saved and returned.
@@ -102,7 +115,7 @@ describe('notification producers', () => {
     type Fake = { usersWithRoles: jest.Mock; notify: jest.Mock; safely: (work: (n: Fake) => Promise<void>) => Promise<void> };
     const failing: Fake = { usersWithRoles: jest.fn().mockRejectedValue(new Error('db down')), notify: jest.fn(), safely: (work) => real.safely(() => work(failing)) };
     database.announcement.create.mockResolvedValue(created);
-    await expect(new AnnouncementsService(database as never, failing as never).create({ title: 'Holiday', body: 'x', audience: 'STUDENTS' } as never, admin)).resolves.toMatchObject({ id: 'a1' });
+    await expect(new AnnouncementsService(database as never, failing as never).create(input, admin)).resolves.toMatchObject({ id: 'a1' });
   });
 
   it("asks every Admin and the host department's HOD to approve a visitor, and tells the registrant the outcome", async () => {
