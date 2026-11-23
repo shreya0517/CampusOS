@@ -1,5 +1,5 @@
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
-import { AuthService, hashPassword, LOGIN_FAILURE_LIMIT, passwordResetEmail, RESET_REQUEST_LIMIT, verifyPassword } from './auth.service';
+import { AuthService, hashPassword, LOGIN_FAILURE_LIMIT, passwordResetEmail, RESET_REQUEST_LIMIT, shellQuote, verifyPassword } from './auth.service';
 import { getAuthConfig } from './auth.config';
 
 const activeUser = { id: 'user-1', collegeId: 'college-1', email: 'user@example.test', displayName: 'Test User', status: 'ACTIVE', emailVerifiedAt: new Date(), passwordHash: '' };
@@ -261,8 +261,12 @@ describe('AuthService', () => {
       await flush();
       expect(notifications.notify).toHaveBeenCalledWith('college-1', ['admin-1'], expect.objectContaining({
         link: null,
-        body: expect.stringContaining(`pnpm --filter @campusos/db account:reset-password DEMO ${activeUser.email}`),
+        body: expect.stringContaining(`pnpm --filter @campusos/db account:reset-password 'DEMO' '${activeUser.email}'`),
       }));
+    });
+
+    it('quotes shell characters in the recovery command', () => {
+      expect(shellQuote("o'neil$(touch x)`id`@example.test")).toBe(`'o'"'"'neil$(touch x)\`id\`@example.test'`);
     });
 
     it('does nothing for an unknown or deactivated account', async () => {

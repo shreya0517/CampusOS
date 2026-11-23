@@ -57,6 +57,9 @@ export const passwordResetEmail = (user: { email: string; displayName: string },
 
 const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, (character) => `&#${character.charCodeAt(0)};`);
 
+/** A single-quoted shell argument, so a command shown to an Admin runs the address as text, whatever characters it has. */
+export const shellQuote = (value: string): string => `'${value.replace(/'/g, `'"'"'`)}'`;
+
 @Injectable()
 export class AuthService {
   // Per account, not per IP: behind a proxy every user can share one IP, so an IP limit would lock everyone out.
@@ -226,7 +229,7 @@ export class AuthService {
       title: `Password reset requested: ${user.displayName}`,
       body: record
         ? `${user.displayName} (${user.email}) can't sign in and asked for a new password. Open their record and choose Reset password to issue a temporary one.`
-        : `${user.displayName} (${user.email}) can't sign in and asked for a new password. This account has no faculty or student record, so reset it on the server: pnpm --filter @campusos/db account:reset-password ${college.code} ${user.email}`,
+        : `${user.displayName} (${user.email}) can't sign in and asked for a new password. This account has no faculty or student record, so reset it on the server: pnpm --filter @campusos/db account:reset-password ${shellQuote(college.code)} ${shellQuote(user.email)}`,
       link: record,
     });
   }
