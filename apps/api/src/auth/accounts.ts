@@ -30,6 +30,23 @@ export async function createAccountWithRole(
   return user.id;
 }
 
+/**
+ * Admin issues a new temporary password for an existing account, for someone who forgot theirs while the college has
+ * no email set up. Ends every session of that account and voids any reset link still open. Returns the password, which
+ * is shown to the Admin once. Call it inside the transaction that also writes the audit entry.
+ */
+export async function resetAccountPassword(
+  tx: Pick<DatabaseService, 'user' | 'authSession' | 'passwordResetToken'>,
+  input: { collegeId: string; userId: string },
+): Promise<string> {
+  const temporaryPassword = generateTemporaryPassword();
+  const now = new Date();
+  await tx.user.update({ where: { collegeId_id: { collegeId: input.collegeId, id: input.userId } }, data: { passwordHash: await hashPassword(temporaryPassword) } });
+  await tx.authSession.updateMany({ where: { collegeId: input.collegeId, userId: input.userId, revokedAt: null }, data: { revokedAt: now } });
+  await tx.passwordResetToken.updateMany({ where: { collegeId: input.collegeId, userId: input.userId, usedAt: null }, data: { usedAt: now } });
+  return temporaryPassword;
+}
+
 /** Turns a unique-constraint error on account creation into the right 409: a taken email, or the given fallback. */
 export function accountConflict(error: unknown, fallback: { code: string; message: string }): ConflictException {
   const target = (error as { meta?: { target?: unknown } }).meta?.target;

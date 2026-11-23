@@ -63,4 +63,20 @@ describe('StudentsService sign-in accounts', () => {
     await expect(service.createAccount('student-a', { email: 'x@college.test' }, admin)).rejects.toMatchObject({ response: { code: 'ACCOUNT_EXISTS' } });
     await expect(service.createAccount('student-b', { email: 'x@college.test' }, hod)).rejects.toBeInstanceOf(ForbiddenException);
   });
+
+  it('issues a new temporary password and signs the student out, for admins only', async () => {
+    const database = { ...createDatabase(), user: { update: jest.fn() }, authSession: { updateMany: jest.fn() }, passwordResetToken: { updateMany: jest.fn() } };
+    database.$transaction.mockImplementation((work: (tx: typeof database) => Promise<unknown>) => work(database));
+    const service = new StudentsService(database as never);
+    database.student.findFirst.mockResolvedValueOnce({ id: 'student-a', userId: 'user-a' }).mockResolvedValueOnce(studentRow);
+    const result = await service.resetAccountPassword('student-a', admin);
+    const update = database.user.update.mock.calls[0]?.[0] as { data: { passwordHash: string } };
+    await expect(verifyPassword(result.temporaryPassword, update.data.passwordHash)).resolves.toBe(true);
+    expect(database.authSession.updateMany).toHaveBeenCalledWith({ where: { collegeId: 'college-a', userId: 'user-a', revokedAt: null }, data: { revokedAt: expect.any(Date) } });
+    expect(database.auditLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({ action: 'STUDENT_ACCOUNT_PASSWORD_RESET', entityId: 'student-a' }) });
+
+    await expect(service.resetAccountPassword('student-a', hod)).rejects.toBeInstanceOf(ForbiddenException);
+    database.student.findFirst.mockResolvedValueOnce({ id: 'student-b', userId: null });
+    await expect(service.resetAccountPassword('student-b', admin)).rejects.toMatchObject({ response: { code: 'NO_ACCOUNT' } });
+  });
 });

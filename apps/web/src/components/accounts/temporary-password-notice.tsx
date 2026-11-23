@@ -4,11 +4,11 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 
 /** Shows a newly issued temporary password. It is never shown again, so the Admin is asked to hand it over now. */
-export function TemporaryPasswordNotice({ email, password, who = 'the person' }: { email: string; password: string; who?: string }) {
+export function TemporaryPasswordNotice({ email, password, who = 'the person', title = 'Sign-in account created' }: { email: string; password: string; who?: string; title?: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div role="status" className="rounded-[var(--radius)] border border-emerald-300 bg-emerald-50 p-4 text-sm dark:border-emerald-800 dark:bg-emerald-950/40">
-      <p className="font-semibold text-emerald-900 dark:text-emerald-200">Sign-in account created</p>
+      <p className="font-semibold text-emerald-900 dark:text-emerald-200">{title}</p>
       <p className="mt-1 text-emerald-900/80 dark:text-emerald-200/80">
         Share these details with {who}. They sign in with this temporary password and should change it under Settings. It won&apos;t be shown again.
       </p>

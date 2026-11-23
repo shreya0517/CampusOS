@@ -3,7 +3,7 @@ import { EnrollmentStatus, UserStatus } from '@prisma/client';
 import { DatabaseService } from '../database.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
 import type { AccountStatusDto, CreateStudentDto, EnrollmentDto, StudentAccountDto, StudentListQuery, UpdateMyContactDto, UpdateStudentDto } from './students.dto';
-import { accountConflict, createAccountWithRole, generateTemporaryPassword } from '../auth/accounts';
+import { accountConflict, createAccountWithRole, generateTemporaryPassword, resetAccountPassword } from '../auth/accounts';
 
 /** The CSV export stops at this many students; filter the list to export more. */
 export const STUDENT_EXPORT_LIMIT = 10_000;
@@ -120,6 +120,21 @@ export class StudentsService {
       });
     });
     return this.get(id, context);
+  }
+
+  /** Admin issues a new temporary password, for a student who forgot theirs; signs them out everywhere. Audited. */
+  async resetAccountPassword(id: string, context: AuthorizationContext) {
+    if (!context.roles.includes('ADMIN')) throw denied();
+    const student = await this.database.student.findFirst({ where: { id, collegeId: context.collegeId }, select: { id: true, userId: true } });
+    if (!student) throw missing();
+    const userId = student.userId;
+    if (!userId) throw new ConflictException({ code: 'NO_ACCOUNT', message: 'This student does not have a sign-in account yet.' });
+    const temporaryPassword = await this.database.$transaction(async (tx) => {
+      const issued = await resetAccountPassword(tx, { collegeId: context.collegeId, userId });
+      await tx.auditLog.create({ data: { collegeId: context.collegeId, actorId: context.userId, action: 'STUDENT_ACCOUNT_PASSWORD_RESET', entityType: 'Student', entityId: student.id } });
+      return issued;
+    });
+    return { ...(await this.get(id, context)), temporaryPassword };
   }
 
   private listWhere(query: StudentListQuery, context: AuthorizationContext) {

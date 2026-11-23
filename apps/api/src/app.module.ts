@@ -17,6 +17,7 @@ import { EventsModule } from './events/events.module';
 import { OverviewModule } from './overview/overview.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SettingsModule } from './settings/settings.module';
+import { MailModule } from './mail/mail.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { SettingsModule } from './settings/settings.module';
     AuthorizationModule,
     EventsModule,
     NotificationsModule,
+    MailModule,
     StudentsModule,
     DepartmentsModule,
     FacultyModule,
