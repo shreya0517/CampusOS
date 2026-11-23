@@ -452,6 +452,8 @@ function HodDashboard() {
   const [deptName, setDeptName] = useState<string | null>(null);
   const [taskStats, setTaskStats] = useState<TaskStats | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
+  // Tasks assigned to the HOD themselves, e.g. by Admin; these can come from outside the department list above.
+  const [myAssignments, setMyAssignments] = useState<TaskAssignment[]>([]);
   const [pendingVisitors, setPendingVisitors] = useState(0);
   const [loading, setLoading] = useState(true);
 
@@ -460,9 +462,11 @@ function HodDashboard() {
     Promise.all([
       getMyAssignmentStats(),
       listTasks(taskParams),
-    ]).then(([ts, tRes]) => {
+      listMyAssignments(new URLSearchParams({ page: '1', pageSize: '10' })),
+    ]).then(([ts, tRes, mine]) => {
       setTaskStats(ts);
       setTasks(tRes.items);
+      setMyAssignments(mine.items);
     }).catch(() => undefined);
   }, []);
 
@@ -474,12 +478,14 @@ function HodDashboard() {
       listFaculty(facultyParams),
       getMyAssignmentStats(),
       listTasks(taskParams),
-    ]).then(([fRes, ts, tRes]) => {
+      listMyAssignments(new URLSearchParams({ page: '1', pageSize: '10' })).catch(() => ({ items: [] as TaskAssignment[] })),
+    ]).then(([fRes, ts, tRes, mine]) => {
       setFaculty(fRes.items);
       const dept = fRes.items.find((f) => f.department)?.department;
       if (dept) setDeptName(dept.name);
       setTaskStats(ts);
       setTasks(tRes.items);
+      setMyAssignments(mine.items);
       setLoading(false);
     }).catch(() => setLoading(false));
 
@@ -577,6 +583,44 @@ function HodDashboard() {
           <StatCard label="Approved" value={taskStats.approved} />
           <StatCard label="Needs Rework" value={taskStats.rework} />
         </div>
+      )}
+
+      {/* Tasks assigned to the HOD; the counts above are these, not the department's */}
+      {myAssignments.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>My Tasks ({myAssignments.length})</CardTitle>
+                <CardDescription>Work assigned to you, including tasks from the College Admin.</CardDescription>
+              </div>
+              <Link href="/dashboard/tasks" className="text-xs font-semibold text-[hsl(var(--primary))] underline underline-offset-4">
+                View All →
+              </Link>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y">
+              {myAssignments.map((a) => (
+                <div key={a.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+                  <div>
+                    <p className="text-sm font-medium">{a.task?.title ?? 'Untitled Task'}</p>
+                    <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                      Deadline: {a.task?.deadline ? new Date(a.task.deadline).toLocaleDateString('en-IN') : '—'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge value={a.task?.priority ?? 'MEDIUM'} map={PRIORITY_BADGE} />
+                    <Badge value={a.status} map={TASK_STATUS_BADGE} />
+                    <Link href={`/dashboard/tasks/${a.taskId}`}>
+                      <Button variant="outline" className="text-xs">Open</Button>
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Faculty & navigation grid */}
