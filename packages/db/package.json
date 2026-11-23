@@ -13,6 +13,7 @@
     "prisma:migrate:deploy": "pnpm exec prisma migrate deploy",
     "prisma:migrate:status": "pnpm exec prisma migrate status",
     "prisma:seed": "pnpm exec prisma db seed",
+    "prisma:seed:demo": "pnpm exec prisma db seed && tsx prisma/demo-seed.ts",
     "prisma:validate": "pnpm exec prisma validate"
   },
   "prisma": {
