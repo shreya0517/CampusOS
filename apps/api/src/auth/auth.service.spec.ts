@@ -197,6 +197,8 @@ describe('AuthService', () => {
     await service.logout('refresh-token');
     await service.resetPassword({ token: 'reset-token', password: 'a-new-strong-password' });
     expect(database.authSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { revokedAt: expect.any(Date) } }));
+    // The account's other open reset links are voided with it.
+    expect(database.passwordResetToken.updateMany).toHaveBeenLastCalledWith({ where: { collegeId: activeUser.collegeId, userId: activeUser.id, usedAt: null }, data: { usedAt: expect.any(Date) } });
     database.authSession.findUnique.mockResolvedValue({ ...activeSession, revokedAt: new Date() });
     const token = (service as unknown as { createAccessToken(sub: string, collegeId: string, sid: string): string }).createAccessToken(activeUser.id, activeUser.collegeId, activeSession.id);
     await expect(service.authorizeAccessToken(token)).rejects.toBeInstanceOf(UnauthorizedException);

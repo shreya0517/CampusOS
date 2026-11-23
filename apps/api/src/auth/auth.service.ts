@@ -247,6 +247,8 @@ export class AuthService {
       if (consumption.count !== 1) throw new BadRequestException({ code: 'INVALID_RESET', message: 'Reset link or password is invalid.' });
       await transaction.user.update({ where: { collegeId_id: { collegeId: record.collegeId, id: record.userId } }, data: { passwordHash } });
       await transaction.authSession.updateMany({ where: { collegeId: record.collegeId, userId: record.userId, revokedAt: null }, data: { revokedAt: new Date() } });
+      // Any other link sent to this account stops working too, so an older or forwarded one can't change the password again.
+      await transaction.passwordResetToken.updateMany({ where: { collegeId: record.collegeId, userId: record.userId, usedAt: null }, data: { usedAt: new Date() } });
     });
   }
 
