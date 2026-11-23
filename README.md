@@ -83,9 +83,26 @@ The seed creates the college **DEMO** with one account per role. Every account u
 
 These credentials are for local development only. Never run the seed against a production database.
 
+### Demo data
+
+For a demonstration, fill the DEMO college with a full sample college:
+
+```bash
+pnpm --filter @campusos/db prisma:seed:demo
+```
+
+It runs the seed above, then adds four departments (CSE, ECE, ME, CE) with their HODs and faculty, about 200 students, a weekly timetable, six weeks of attendance, coursework, exams and results, fees, tasks, visitors and announcements. Dates are relative to the day it runs, and running it again adds nothing twice.
+
+- Every demo account signs in with `DEMO_PASSWORD` if it is set, otherwise with the development password.
+- Students sign in with their roll number, for example `cse26a01@campusos.local`. Faculty use `firstname.lastname@campusos.local`, for example `anjali.verma@campusos.local` (HOD of CSE).
+- To fill a separate demo database, point `DATABASE_URL` at it, then run `pnpm --filter @campusos/db prisma:migrate:deploy` and the command above.
+
 ### Optional services
 
 - **File uploads** need `AWS_REGION`, `AWS_S3_BUCKET`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
+- **Password-reset email** needs `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` and `MAIL_FROM` (Gmail works with an app password), plus `APP_URL` for the link.
+  - Without them, "Forgot password" tells the college's Admins instead. They issue a temporary password from the person's faculty or student record.
+  - An account with neither record, such as an Admin, is reset on the server: `pnpm --filter @campusos/db account:reset-password <college code> <email>`.
 - **Online fee payments** use `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET`.
   - Outside production, without these keys, payments run in a test mode that accepts simulated payments.
   - In production without keys, online payment is switched off and students are told to pay at the accounts office.
