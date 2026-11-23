@@ -43,6 +43,9 @@ export const createStudent = (input: { studentCode: string; firstName: string; l
 export const createStudentAccount = (id: string, email: string): Promise<Student & { temporaryPassword: string }> =>
   authenticatedRequest(`/students/${id}/account`, { method: 'POST', body: JSON.stringify({ email }) });
 export const getStudentRecord = (id: string): Promise<StudentRecord> => authenticatedRequest(`/students/${id}/record`);
+/** Admin issues a new temporary password, for someone who forgot theirs; it is returned once. */
+export const resetStudentPassword = (id: string): Promise<Student & { temporaryPassword: string }> =>
+  authenticatedRequest(`/students/${id}/account/password`, { method: 'POST' });
 export const setStudentAccountStatus = (id: string, status: 'ACTIVE' | 'INACTIVE'): Promise<Student> =>
   authenticatedRequest(`/students/${id}/account`, { method: 'PUT', body: JSON.stringify({ status }) });
 export const exportStudentsCsv = (params: URLSearchParams): Promise<Blob> => authenticatedDownload(`/students/export?${params.toString()}`);

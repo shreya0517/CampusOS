@@ -47,5 +47,10 @@ export async function authenticatedDownload(path: string): Promise<Blob> {
   }
   return response.blob();
 }
+/** How a forgotten password reaches its owner: a reset link by email, or a temporary password from the college's Admin. */
+export async function getPasswordResetOptions(): Promise<{ delivery: 'email' | 'admin' }> { return apiRequest<{ delivery: 'email' | 'admin' }>('/auth/password-reset-options'); }
+/** Always succeeds for a well-formed request, whether or not the account exists. */
+export async function requestPasswordReset(input: { collegeCode: string; email: string }): Promise<void> { await apiRequest<void>('/auth/forgot-password', { method: 'POST', body: JSON.stringify(input) }); }
+export async function resetPassword(input: { token: string; password: string }): Promise<void> { await apiRequest<void>('/auth/reset-password', { method: 'POST', body: JSON.stringify(input) }); }
 export async function getMe(): Promise<{ user: AuthUser }> { return authenticatedRequest<{ user: AuthUser }>('/auth/me'); }
 export async function changePassword(input: { currentPassword: string; newPassword: string }): Promise<void> { await authenticatedRequest<void>('/auth/change-password', { method: 'POST', body: JSON.stringify(input) }); }

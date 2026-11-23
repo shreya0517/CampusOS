@@ -24,6 +24,7 @@ export class StudentsController {
   @Put(':id') @RequireRoles('ADMIN', 'HOD') update(@Param('id') id: string, @Body() body: unknown, @CurrentAuthorization() context: AuthorizationContext) { return this.students.update(id, parseUpdateStudentDto(body), context); }
   @Get(':id/record') @RequireRoles('ADMIN', 'HOD') record(@Param('id') id: string, @CurrentAuthorization() context: AuthorizationContext) { return this.records.record(id, context); }
   @Post(':id/account') @RequireRoles('ADMIN') createAccount(@Param('id') id: string, @Body() body: unknown, @CurrentAuthorization() context: AuthorizationContext) { return this.students.createAccount(id, parseStudentAccountDto(body), context); }
+  @Post(':id/account/password') @RequireRoles('ADMIN') resetAccountPassword(@Param('id') id: string, @CurrentAuthorization() context: AuthorizationContext) { return this.students.resetAccountPassword(id, context); }
   @Put(':id/account') @RequireRoles('ADMIN') setAccountStatus(@Param('id') id: string, @Body() body: unknown, @CurrentAuthorization() context: AuthorizationContext) { return this.students.setAccountStatus(id, parseAccountStatusDto(body), context); }
   @Post(':id/enrollments') @RequireRoles('ADMIN') enroll(@Param('id') id: string, @Body() body: unknown, @CurrentAuthorization() context: AuthorizationContext) { return this.students.enroll(id, parseEnrollmentDto(body), context); }
 }

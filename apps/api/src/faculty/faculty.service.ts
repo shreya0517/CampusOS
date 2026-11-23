@@ -1,7 +1,7 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { UserStatus } from '@prisma/client';
 import { DatabaseService } from '../database.service';
-import { accountConflict, createAccountWithRole, generateTemporaryPassword } from '../auth/accounts';
+import { accountConflict, createAccountWithRole, generateTemporaryPassword, resetAccountPassword } from '../auth/accounts';
 import type { AuthorizationContext } from '../authorization/authorization.types';
 import type { FacultyAccountDto, FacultyAccountStatusDto, FacultyDto, FacultyUpdateDto } from './faculty.dto';
 
@@ -124,6 +124,22 @@ export class FacultyService {
       });
     });
     return this.get(id, c);
+  }
+
+  /** Admin issues a new temporary password, for a faculty member who forgot theirs; signs them out everywhere. Audited. */
+  async resetAccountPassword(id: string, c: AuthorizationContext) {
+    this.write(c);
+    const faculty = await this.database.faculty.findFirst({ where: { id, collegeId: c.collegeId }, select: { id: true, userId: true } });
+    if (!faculty) missing();
+    const userId = faculty!.userId;
+    if (!userId) throw new ConflictException({ code: 'NO_ACCOUNT', message: 'This faculty member does not have a sign-in account yet.' });
+    if (userId === c.userId) throw new ConflictException({ code: 'OWN_ACCOUNT', message: 'Change your own password under Settings.' });
+    const temporaryPassword = await this.database.$transaction(async (tx) => {
+      const issued = await resetAccountPassword(tx, { collegeId: c.collegeId, userId });
+      await tx.auditLog.create({ data: { collegeId: c.collegeId, actorId: c.userId, action: 'FACULTY_ACCOUNT_PASSWORD_RESET', entityType: 'Faculty', entityId: id } });
+      return issued;
+    });
+    return { ...(await this.get(id, c)), temporaryPassword };
   }
 
   async list(q: { search?: string; departmentId?: string; page: number; pageSize: number }, c: AuthorizationContext) {

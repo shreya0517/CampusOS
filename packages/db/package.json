@@ -13,6 +13,7 @@
     "prisma:migrate:deploy": "pnpm exec prisma migrate deploy",
     "prisma:migrate:status": "pnpm exec prisma migrate status",
     "prisma:seed": "pnpm exec prisma db seed",
+    "account:reset-password": "tsx --env-file-if-exists=../../.env prisma/reset-password.ts",
     "prisma:validate": "pnpm exec prisma validate"
   },
   "prisma": {

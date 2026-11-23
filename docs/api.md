@@ -43,8 +43,11 @@ All authentication endpoints are under `/api/v1/auth`. Registration and login re
 - `POST /api/v1/auth/logout`: uses the refresh cookie, revokes its session, clears the cookie, and returns `204`. Access tokens for that session fail immediately.
 - `GET /api/v1/auth/me`: requires `Authorization: Bearer <access-token>` and returns `200 { "user": { "id", "collegeId", "email", "displayName", "emailVerified" } }`.
 - `POST /api/v1/auth/verify-email`: accepts `{ "token" }`, consumes an opaque email-verification token, and returns `204`.
-- `POST /api/v1/auth/forgot-password`: accepts `{ "collegeCode", "email" }`, always returns `204`, and creates a reset-token record only for an existing account.
-- `POST /api/v1/auth/reset-password`: accepts `{ "token", "password" }` with a password of at least 12 characters, returns `204`, and invalidates all existing sessions for the account.
+- `GET /api/v1/auth/password-reset-options`: public. Returns `{ "delivery": "email" | "admin" }`: how a forgotten password reaches its owner, so the forgot-password page can say so.
+- `POST /api/v1/auth/forgot-password`: accepts `{ "collegeCode", "email" }` and always returns `204`, whether or not the account exists. Only an existing, active account gets a reset, delivered after the response so its timing reveals nothing:
+  - **`email`** (SMTP configured, see `.env.example`): a reset token is created and emailed as a link to `APP_URL/reset-password?token=…`, valid for one hour, once.
+  - **`admin`** (no SMTP): no token is created. The college's active Admins get an `ACCOUNT` notification linking to the person's faculty or student record, where they issue a temporary password (`POST /faculty/:id/account/password`, `POST /students/:id/account/password`). An account with neither record (an Admin) is reset on the server with `pnpm --filter @campusos/db account:reset-password <college code> <email>`, which prints a temporary password once.
+- `POST /api/v1/auth/reset-password`: accepts `{ "token", "password" }` with a password of at least 12 characters, returns `204`, invalidates all existing sessions for the account, and voids its other unused reset links.
 - `POST /api/v1/auth/change-password`: requires a bearer access token and accepts `{ "currentPassword", "newPassword" }`. The new password needs at least 12 characters and must differ from the current one. Returns `204`, keeps the calling session and revokes every other session of the user. A wrong current password returns `400 INVALID_CURRENT_PASSWORD` (not 401, so clients don't treat it as an expired session); an invalid new password returns `400 INVALID_NEW_PASSWORD`.
 
 Rate limits, kept in memory by each API instance and counted per account (college code and email), not per IP:
@@ -64,9 +67,9 @@ Content-Type: application/json
 { "token": "<token from the local API console>" }
 ```
 
-Production never logs or returns raw verification tokens. An email delivery provider remains the future production delivery mechanism.
+Production never logs or returns raw verification tokens. Email verification still has no delivery by email; SMTP is used for password-reset links only.
 
-For local password recovery, `POST /api/v1/auth/forgot-password` writes a reset instruction with its opaque token to the API console under the same `AUTH_LOG_TOKENS` rule. Use that token with `POST /api/v1/auth/reset-password`. Production never logs or returns reset tokens.
+For local password recovery, `POST /api/v1/auth/forgot-password` also writes a reset instruction with its opaque token to the API console under the same `AUTH_LOG_TOKENS` rule, in either delivery mode. Use that token with `POST /api/v1/auth/reset-password`. Production never logs or returns reset tokens, and logs never include the recipient's address.
 
 API integration tests use the actual Nest controller, guard, service, and token logic with an in-memory Prisma-compatible persistence boundary. They do not claim PostgreSQL integration coverage.
 
@@ -269,7 +272,8 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 - POST /api/v1/faculty: ADMIN only. Accepts `designation` and an optional `email`. With an email, it also creates a FACULTY sign-in account (marked verified, since Admin vouches for it) and returns `temporaryPassword` once; it is never stored or shown again. The faculty member signs in with it and changes it under Settings. The record, the account and the role are created together or not at all; a taken email returns 409 ACCOUNT_EXISTS.
 - POST /api/v1/faculty/:id/account: ADMIN only, body `{ "email": string }`. Creates a sign-in account for a faculty member who has none and returns `temporaryPassword` once; 409 ACCOUNT_EXISTS if they already have one.
 - PUT /api/v1/faculty/:id/account: ADMIN only, body `{ "status": "ACTIVE" | "INACTIVE" }`. Deactivating ends all of the person's sessions. 409 NO_ACCOUNT without an account, 409 OWN_ACCOUNT for your own.
-- Account creation and status changes are audited (FACULTY_ACCOUNT_CREATED, FACULTY_ACCOUNT_ACTIVATED, FACULTY_ACCOUNT_DEACTIVATED).
+- POST /api/v1/faculty/:id/account/password: ADMIN only, no body. For someone who forgot their password: sets a new temporary password and returns the faculty record with `temporaryPassword` once, ends all of the person's sessions and voids any open reset link. 409 NO_ACCOUNT without an account, 409 OWN_ACCOUNT for your own (use Settings).
+- Account creation, status changes and password resets are audited (FACULTY_ACCOUNT_CREATED, FACULTY_ACCOUNT_ACTIVATED, FACULTY_ACCOUNT_DEACTIVATED, FACULTY_ACCOUNT_PASSWORD_RESET).
 - PUT /api/v1/faculty/:id accepts `designation` (null or an empty string clears it) and `departmentId`.
 
 ## Department Administration
@@ -337,6 +341,7 @@ The actor is never notified about their own action. Finding the recipients and s
 - POST /api/v1/students accepts an optional `email`. With it, the student's STUDENT sign-in account is created too (marked verified, as Admin vouches for it), and `temporaryPassword` is returned once; it is never stored in plain text or shown again. The record, account and role are created together or not at all. A taken email returns 409 ACCOUNT_EXISTS, a taken student code 409 STUDENT_EXISTS.
 - POST /api/v1/students/:id/account: ADMIN only, body `{ "email": string }`. Creates an account for a student who has none and returns `temporaryPassword` once; 409 ACCOUNT_EXISTS if they already have one.
 - Both are audited as STUDENT_ACCOUNT_CREATED. The student signs in with the temporary password and changes it under Settings. Faculty accounts work the same way, and both share `auth/accounts.ts`.
+- POST /api/v1/students/:id/account/password: ADMIN only, no body. For a student who forgot their password: sets a new temporary password and returns the student with `temporaryPassword` once, ends all of their sessions and voids any open reset link. 409 NO_ACCOUNT without an account. Audited as STUDENT_ACCOUNT_PASSWORD_RESET.
 
 ## Institutional Analytics
 

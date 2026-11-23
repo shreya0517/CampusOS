@@ -59,6 +59,9 @@ export const createFaculty = (input: { employeeCode: string; firstName: string; 
   authenticatedRequest('/faculty', { method: 'POST', body: JSON.stringify(input) });
 export const createFacultyAccount = (id: string, email: string): Promise<Faculty & { temporaryPassword: string }> =>
   authenticatedRequest(`/faculty/${id}/account`, { method: 'POST', body: JSON.stringify({ email }) });
+/** Admin issues a new temporary password, for someone who forgot theirs; it is returned once. */
+export const resetFacultyPassword = (id: string): Promise<Faculty & { temporaryPassword: string }> =>
+  authenticatedRequest(`/faculty/${id}/account/password`, { method: 'POST' });
 export const setFacultyAccountStatus = (id: string, status: 'ACTIVE' | 'INACTIVE'): Promise<Faculty> =>
   authenticatedRequest(`/faculty/${id}/account`, { method: 'PUT', body: JSON.stringify({ status }) });
 export const listDepartments = (q = new URLSearchParams()): Promise<List<Department>> => authenticatedRequest(`/departments?${q}`);
