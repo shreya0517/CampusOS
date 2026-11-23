@@ -477,11 +477,12 @@ async function main(): Promise<void> {
   await prisma.assignment.createMany({ data: assignmentRows, skipDuplicates: true });
   await inChunks(submissionRows, (chunk) => prisma.submission.createMany({ data: chunk, skipDuplicates: true }));
 
-  // Exams: mid-semester results published, Class Test 2 marks in review, end-semester exams ahead.
+  // Exams: mid-semester results published, Class Test 2 held last week with its marks in review, end-semester ahead.
+  // Both past exams are COMPLETED; results can still be published for Class Test 2 once its papers are approved.
   const exam = (name: string, status: ExamStatus, startsOn: Date, endsOn: Date) =>
     prisma.exam.upsert({ where: { collegeId_name: { collegeId, name } }, update: {}, create: { collegeId, name, status, startsOn, endsOn } });
   const midSem = await exam('Mid-Semester Examination, Odd Semester 2026', ExamStatus.COMPLETED, day(-28), day(-24));
-  const classTest = await exam('Class Test 2, Odd Semester 2026', ExamStatus.SCHEDULED, day(-9), day(-7));
+  const classTest = await exam('Class Test 2, Odd Semester 2026', ExamStatus.COMPLETED, day(-9), day(-7));
   const endSem = await exam('End-Semester Examination, Odd Semester 2026', ExamStatus.SCHEDULED, day(24), day(35));
   const paperRows: Array<{ id: string; collegeId: string; examId: string; subjectId: string; semesterId: string; sectionId: string; examAt: Date; maxMarks: number; passMarks: number; marksStatus: MarksStatus; marksSubmittedAt?: Date; marksApprovedAt?: Date }> = [];
   const markRows: Array<{ collegeId: string; examSubjectId: string; studentId: string; marksObtained: number | null; isAbsent: boolean }> = [];
