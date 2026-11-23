@@ -349,7 +349,7 @@ async function main(): Promise<void> {
   };
 
   // Classes: one teacher takes a subject in all its sections. Subjects go round the department's faculty, the HOD last.
-  const classes: Array<{ id: string; key: string; section: (typeof sections)[number]; subject: { id: string; name: string; code: string }; faculty: ReturnType<typeof facultyOf> }> = [];
+  const classes: Array<{ id: string; key: string; section: (typeof sections)[number]; subject: { id: string; name: string; code: string }; faculty: ReturnType<typeof facultyOf>; teacherId: string | null }> = [];
   for (const dept of DEPARTMENTS) {
     const teachers = dept.faculty.map((member) => facultyOf(member.employeeCode));
     let subjectIndex = 0;
@@ -359,7 +359,7 @@ async function main(): Promise<void> {
         const teacher = teachers[subjectIndex % teachers.length]!;
         subjectIndex += 1;
         for (const section of sections.filter((s) => s.dept === dept && s.semester === semester)) {
-          classes.push({ id: `demo-cls-${section.key.toLowerCase()}-${subject.code.toLowerCase()}`, key: `${section.key}-${subject.code}`, section, subject, faculty: teacher });
+          classes.push({ id: `demo-cls-${section.key.toLowerCase()}-${subject.code.toLowerCase()}`, key: `${section.key}-${subject.code}`, section, subject, faculty: teacher, teacherId: teacher.id });
         }
       }
     }
@@ -368,9 +368,13 @@ async function main(): Promise<void> {
     data: classes.map((cls) => ({ id: cls.id, collegeId, sectionId: cls.section.id, subjectId: cls.subject.id, facultyId: cls.faculty.id })),
     skipDuplicates: true,
   });
-  // A class may already exist under another id (made in the app); use whatever id it has.
-  const classIds = new Map((await prisma.class.findMany({ where: { collegeId, sectionId: { in: sections.map((s) => s.id) } }, select: { id: true, sectionId: true, subjectId: true } })).map((row) => [`${row.sectionId}:${row.subjectId}`, row.id]));
-  for (const cls of classes) cls.id = classIds.get(`${cls.section.id}:${cls.subject.id}`) ?? cls.id;
+  // A class may already exist (made in the app): use its id and its teacher, who then plans its timetable and owns its
+  // coursework.
+  const existingClasses = new Map((await prisma.class.findMany({ where: { collegeId, sectionId: { in: sections.map((s) => s.id) } }, select: { id: true, sectionId: true, subjectId: true, facultyId: true } })).map((row) => [`${row.sectionId}:${row.subjectId}`, row]));
+  for (const cls of classes) {
+    const existing = existingClasses.get(`${cls.section.id}:${cls.subject.id}`);
+    if (existing) Object.assign(cls, { id: existing.id, teacherId: existing.facultyId });
+  }
 
   // Timetable: three periods a week per class, on different days, with no section, teacher or room double-booked. Each
   // period goes on the day where the teacher, then the section, has the fewest classes, so nobody gets a packed day.
@@ -398,12 +402,12 @@ async function main(): Promise<void> {
   for (const [classIndex, cls] of classes.entries()) {
     if (meetings.has(cls.id)) continue;
     const days: number[] = [];
-    const keys = { section: cls.section.id, faculty: cls.faculty.id, room: cls.section.roomId };
+    const keys = { section: cls.section.id, faculty: cls.teacherId, room: cls.section.roomId };
     while (days.length < MEETINGS_PER_WEEK) {
       const free = slots
         .map((slot, index) => ({ ...slot, order: (index + classIndex * 7) % slots.length }))
         .filter((slot) => !days.includes(slot.weekday) && ['s', 'f', 'r'].every((kind) => !busy.has(`${kind}:${kind === 's' ? keys.section : kind === 'f' ? keys.faculty : keys.room}:${slot.weekday}:${slot.periodIndex}`)));
-      const score = (slot: (typeof free)[number]) => (load.get(`f:${cls.faculty.id}:${slot.weekday}`) ?? 0) * 100 + (load.get(`s:${cls.section.id}:${slot.weekday}`) ?? 0) * 10 + slot.order / slots.length;
+      const score = (slot: (typeof free)[number]) => (load.get(`f:${cls.teacherId}:${slot.weekday}`) ?? 0) * 100 + (load.get(`s:${cls.section.id}:${slot.weekday}`) ?? 0) * 10 + slot.order / slots.length;
       const slot = free.sort((a, b) => score(a) - score(b))[0];
       if (!slot) throw new Error(`No free period left for ${cls.key}.`);
       book(keys, slot.weekday, slot.periodIndex);
@@ -448,13 +452,13 @@ async function main(): Promise<void> {
   await inChunks(recordRows.filter((row) => sessionIds.has(row.attendanceId)), (chunk) => prisma.attendanceRecord.createMany({ data: chunk, skipDuplicates: true }));
 
   // Coursework: a graded problem set from two weeks ago and a project proposal due next week.
-  const assignmentRows: Array<{ id: string; collegeId: string; classId: string; createdById: string; title: string; description: string; dueAt: Date; maxMarks: number }> = [];
+  const assignmentRows: Array<{ id: string; collegeId: string; classId: string; createdById: string | null; title: string; description: string; dueAt: Date; maxMarks: number }> = [];
   const submissionRows: Array<{ collegeId: string; assignmentId: string; studentId: string; status: SubmissionStatus; submittedAt: Date; marksAwarded?: number; feedback?: string }> = [];
   const FEEDBACK = ['Well done.', 'Good work; show the intermediate steps next time.', 'Correct approach, a few calculation slips.', 'Neat and complete.', 'Revise the second question.'];
   for (const cls of classes) {
     const graded = { id: `demo-asg-${cls.key.toLowerCase()}-1`, title: `${cls.subject.name}: Problem Set 1`, description: 'Solve the problems from Units 1 and 2. Show your working.', dueAt: at(-12, 23, 59), maxMarks: 10 };
     const upcoming = { id: `demo-asg-${cls.key.toLowerCase()}-2`, title: `${cls.subject.name}: Mini Project Proposal`, description: 'Submit a one-page proposal: problem, approach and expected outcome.', dueAt: at(5, 23, 59), maxMarks: 20 };
-    for (const assignment of [graded, upcoming]) assignmentRows.push({ ...assignment, collegeId, classId: cls.id, createdById: cls.faculty.id });
+    for (const assignment of [graded, upcoming]) assignmentRows.push({ ...assignment, collegeId, classId: cls.id, createdById: cls.teacherId });
     for (const student of rosters.get(cls.section.id) ?? []) {
       const next = random(`${graded.id}-${student.studentCode}`);
       if (next() < 0.9 || student.studentCode === 'DEV-CSE-001') {
@@ -480,7 +484,8 @@ async function main(): Promise<void> {
   // Exams: mid-semester results published, Class Test 2 held last week with its marks in review, end-semester ahead.
   // Both past exams are COMPLETED; results can still be published for Class Test 2 once its papers are approved.
   const exam = (name: string, status: ExamStatus, startsOn: Date, endsOn: Date) =>
-    prisma.exam.upsert({ where: { collegeId_name: { collegeId, name } }, update: {}, create: { collegeId, name, status, startsOn, endsOn } });
+    // The status is refreshed on every run, so a database seeded by an earlier version gets it too.
+    prisma.exam.upsert({ where: { collegeId_name: { collegeId, name } }, update: { status }, create: { collegeId, name, status, startsOn, endsOn } });
   const midSem = await exam('Mid-Semester Examination, Odd Semester 2026', ExamStatus.COMPLETED, day(-28), day(-24));
   const classTest = await exam('Class Test 2, Odd Semester 2026', ExamStatus.COMPLETED, day(-9), day(-7));
   const endSem = await exam('End-Semester Examination, Odd Semester 2026', ExamStatus.SCHEDULED, day(24), day(35));
