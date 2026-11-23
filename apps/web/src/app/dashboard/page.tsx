@@ -446,6 +446,9 @@ function AdminDashboard() {
 }
 
 // ─── HOD Dashboard ────────────────────────────────────────────────────────────
+/** How many of their own tasks the HOD dashboard lists; the rest are on the Tasks page. */
+const MY_TASKS_SHOWN = 10;
+
 function HodDashboard() {
   const { user } = useAuth();
   const [faculty, setFaculty] = useState<Faculty[]>([]);
@@ -453,7 +456,9 @@ function HodDashboard() {
   const [taskStats, setTaskStats] = useState<TaskStats | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   // Tasks assigned to the HOD themselves, e.g. by Admin; these can come from outside the department list above.
+  // GET /tasks/my returns every assignment, so the card shows the first few and the full count.
   const [myAssignments, setMyAssignments] = useState<TaskAssignment[]>([]);
+  const [myAssignmentTotal, setMyAssignmentTotal] = useState(0);
   const [pendingVisitors, setPendingVisitors] = useState(0);
   const [loading, setLoading] = useState(true);
 
@@ -462,11 +467,12 @@ function HodDashboard() {
     Promise.all([
       getMyAssignmentStats(),
       listTasks(taskParams),
-      listMyAssignments(new URLSearchParams({ page: '1', pageSize: '10' })),
+      listMyAssignments(new URLSearchParams({ page: '1', pageSize: String(MY_TASKS_SHOWN) })),
     ]).then(([ts, tRes, mine]) => {
       setTaskStats(ts);
       setTasks(tRes.items);
-      setMyAssignments(mine.items);
+      setMyAssignments(mine.items.slice(0, MY_TASKS_SHOWN));
+      setMyAssignmentTotal(mine.total);
     }).catch(() => undefined);
   }, []);
 
@@ -478,14 +484,15 @@ function HodDashboard() {
       listFaculty(facultyParams),
       getMyAssignmentStats(),
       listTasks(taskParams),
-      listMyAssignments(new URLSearchParams({ page: '1', pageSize: '10' })).catch(() => ({ items: [] as TaskAssignment[] })),
+      listMyAssignments(new URLSearchParams({ page: '1', pageSize: String(MY_TASKS_SHOWN) })).catch(() => ({ items: [] as TaskAssignment[], total: 0 })),
     ]).then(([fRes, ts, tRes, mine]) => {
       setFaculty(fRes.items);
       const dept = fRes.items.find((f) => f.department)?.department;
       if (dept) setDeptName(dept.name);
       setTaskStats(ts);
       setTasks(tRes.items);
-      setMyAssignments(mine.items);
+      setMyAssignments(mine.items.slice(0, MY_TASKS_SHOWN));
+      setMyAssignmentTotal(mine.total);
       setLoading(false);
     }).catch(() => setLoading(false));
 
@@ -591,8 +598,10 @@ function HodDashboard() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle>My Tasks ({myAssignments.length})</CardTitle>
-                <CardDescription>Work assigned to you, including tasks from the College Admin.</CardDescription>
+                <CardTitle>My Tasks ({myAssignmentTotal})</CardTitle>
+                <CardDescription>
+                  Work assigned to you, including tasks from the College Admin.{myAssignmentTotal > myAssignments.length ? ` Showing the first ${myAssignments.length}.` : ''}
+                </CardDescription>
               </div>
               <Link href="/dashboard/tasks" className="text-xs font-semibold text-[hsl(var(--primary))] underline underline-offset-4">
                 View All →
