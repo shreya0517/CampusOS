@@ -203,14 +203,15 @@ export class AuthService {
         })
       : null;
     if (!college || !user || user.status !== 'ACTIVE') return;
-    void this.deliverPasswordReset(user, college.name).catch((error: unknown) => this.logger.error(`Password reset for ${user.email} was not delivered: ${(error as Error).message}`));
+    // No address in the log, so account details stay out of the log sink.
+    void this.deliverPasswordReset(user, college).catch((error: unknown) => this.logger.error(`A password reset was not delivered: ${(error as Error).message}`));
   }
 
-  private async deliverPasswordReset(user: ResetRecipient, collegeName: string): Promise<void> {
+  private async deliverPasswordReset(user: ResetRecipient, college: { code: string; name: string }): Promise<void> {
     if (this.passwordResetDelivery() === 'email') {
       const resetToken = await this.createPasswordResetToken(user.collegeId, user.id);
       this.logDevelopmentPasswordReset(user.email, resetToken);
-      await this.mail!.send(passwordResetEmail(user, collegeName, resetToken));
+      await this.mail!.send(passwordResetEmail(user, college.name, resetToken));
       return;
     }
     if (getAuthConfig().logTokens) this.logDevelopmentPasswordReset(user.email, await this.createPasswordResetToken(user.collegeId, user.id));
@@ -225,7 +226,7 @@ export class AuthService {
       title: `Password reset requested: ${user.displayName}`,
       body: record
         ? `${user.displayName} (${user.email}) can't sign in and asked for a new password. Open their record and choose Reset password to issue a temporary one.`
-        : `${user.displayName} (${user.email}) can't sign in and asked for a new password. This account has no faculty or student record, so it can't be reset from the app.`,
+        : `${user.displayName} (${user.email}) can't sign in and asked for a new password. This account has no faculty or student record, so reset it on the server: pnpm --filter @campusos/db account:reset-password ${college.code} ${user.email}`,
       link: record,
     });
   }

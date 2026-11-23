@@ -14,6 +14,11 @@ describe('getMailConfig', () => {
     expect(getMailConfig({ SMTP_HOST: 'smtp.example.test', SMTP_PORT: '2525', SMTP_SECURE: 'true', MAIL_FROM: 'a@example.test' })).toMatchObject({ port: 2525, secure: true });
   });
 
+  it('treats blank values as unset, as .env.example leaves them', () => {
+    expect(getMailConfig({ SMTP_HOST: 'smtp.example.test', SMTP_PORT: '', SMTP_USER: 'campus@example.test', MAIL_FROM: '' })).toMatchObject({ port: 587, from: 'campus@example.test' });
+    expect(getMailConfig({ SMTP_HOST: '', SMTP_USER: 'campus@example.test' })).toBeNull();
+  });
+
   it('rejects a bad port', () => {
     expect(() => getMailConfig({ SMTP_HOST: 'smtp.example.test', SMTP_PORT: 'abc', MAIL_FROM: 'a@example.test' })).toThrow('SMTP_PORT');
   });

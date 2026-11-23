@@ -224,7 +224,7 @@ describe('AuthService', () => {
     const recipient = { ...activeUser, facultyProfiles: [{ id: 'faculty-1' }], studentProfiles: [] };
     const setup = (mail?: { configured: boolean; send: jest.Mock }) => {
       const database = { ...createDatabase(), user: { findUnique: jest.fn().mockResolvedValue(recipient), findMany: jest.fn().mockResolvedValue([{ id: 'admin-1' }]) } };
-      database.college.findUnique.mockResolvedValue({ id: 'college-1', name: 'Demo College' });
+      database.college.findUnique.mockResolvedValue({ id: 'college-1', code: 'DEMO', name: 'Demo College' });
       database.passwordResetToken.create.mockResolvedValue({});
       const notifications = { notify: jest.fn() };
       return { database, notifications, service: new AuthService(database as never, mail as never, notifications as never) };
@@ -252,6 +252,17 @@ describe('AuthService', () => {
       expect(notifications.notify).toHaveBeenCalledWith('college-1', ['admin-1'], expect.objectContaining({ category: 'ACCOUNT', link: '/dashboard/faculty/faculty-1' }));
       // Nothing to deliver a link with, so none is made.
       expect(database.passwordResetToken.create).not.toHaveBeenCalled();
+    });
+
+    it('points the Admins to the server command for an account with no record to reset it from', async () => {
+      const { database, notifications, service } = setup();
+      database.user.findUnique.mockResolvedValue({ ...recipient, facultyProfiles: [], studentProfiles: [] });
+      await service.requestPasswordReset({ collegeCode: 'DEMO', email: activeUser.email });
+      await flush();
+      expect(notifications.notify).toHaveBeenCalledWith('college-1', ['admin-1'], expect.objectContaining({
+        link: null,
+        body: expect.stringContaining(`pnpm --filter @campusos/db account:reset-password DEMO ${activeUser.email}`),
+      }));
     });
 
     it('does nothing for an unknown or deactivated account', async () => {
