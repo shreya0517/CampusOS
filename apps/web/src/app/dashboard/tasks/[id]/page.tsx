@@ -70,6 +70,8 @@ export default function TaskDetailPage() {
 
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // The server decides: an HOD manages their own department's tasks, and only works on ones assigned from elsewhere.
+  const canManage = task?.canManage ?? false;
   const myAssignment = task?.assignments.find((a) => a.assigneeUserId === user?.id) ?? null;
   // Tasks go to a person's sign-in account (its user id, not the faculty record's id), so only people with an
   // active account can be picked, and nobody already on the task.
@@ -83,7 +85,7 @@ export default function TaskDetailPage() {
     try {
       const t = await getTask(id);
       setTask(t);
-      if (isManager) {
+      if (isManager && t.canManage) {
         const fRes = await listFaculty(new URLSearchParams({ page: '1', pageSize: '100' }));
         setFaculty(fRes.items);
       }
@@ -193,7 +195,7 @@ export default function TaskDetailPage() {
             <Badge value={task.status} map={STATUS_BADGE} />
           </div>
         </div>
-        {isManager && (
+        {canManage && (
           <Button onClick={() => setAssignOpen(true)}>Assign to User</Button>
         )}
       </div>
@@ -262,7 +264,7 @@ export default function TaskDetailPage() {
       </div>
 
       {/* Assignments table (managers) */}
-      {isManager && task.assignments.length > 0 && (
+      {canManage && task.assignments.length > 0 && (
         <Card>
           <CardHeader><CardTitle>Assignments ({task.assignments.length})</CardTitle></CardHeader>
           <CardContent className="p-0">

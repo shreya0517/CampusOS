@@ -165,32 +165,49 @@ export class TasksService {
     return { items, total, page: query.page, pageSize: query.pageSize };
   }
 
+  /**
+   * Admin manages every task in the college; an HOD manages their own department's tasks. A task assigned to an HOD
+   * outside their department (or to no department) is work they do, like a faculty member's, not one they manage.
+   */
+  private canManageTask(task: { departmentId: string | null }, context: AuthorizationContext): boolean {
+    return this.isAdmin(context) || (this.isHod(context) && task.departmentId !== null && task.departmentId === context.departmentId);
+  }
+
+  /** The task with a `canManage` flag for the pages; 404 unless the reader manages it or is assigned to it. */
   async getTask(id: string, context: AuthorizationContext): Promise<unknown> {
     const where: Record<string, unknown> = { id, collegeId: context.collegeId };
+    const assignedToMe = { assignments: { some: { assigneeUserId: context.userId, collegeId: context.collegeId } } };
 
-    if (!this.isAdmin(context) && !this.isHod(context)) {
-      where.assignments = { some: { assigneeUserId: context.userId, collegeId: context.collegeId } };
-    } else if (this.isHod(context) && !this.isAdmin(context)) {
-      where.departmentId = this.hodDepartmentId(context);
+    if (!this.isAdmin(context)) {
+      if (this.isHod(context) && context.departmentId) where.OR = [{ departmentId: context.departmentId }, assignedToMe];
+      else Object.assign(where, assignedToMe);
     }
 
-    const manager = this.isAdmin(context) || this.isHod(context);
     const task = await this.database.task.findFirst({
       where,
       include: {
         ...taskInclude,
-        // Someone working on a shared task sees only their own assignment, never the others' emails or submissions.
-        assignments: { ...(manager ? {} : { where: { assigneeUserId: context.userId } }), include: assignmentInclude },
+        // Every assignment for whoever manages the task; anyone else sees only their own, never the others' emails or submissions.
+        assignments: { ...(this.isAdmin(context) ? {} : { where: this.ownOrManagedAssignments(context) }), include: assignmentInclude },
         _count: { select: { assignments: true } },
       },
     });
     if (!task) taskMissing();
-    return task;
+    return { ...task, canManage: this.canManageTask(task as { departmentId: string | null }, context) };
+  }
+
+  /** Assignments a non-admin may read: their own, plus (for an HOD) every assignment on their department's tasks. */
+  private ownOrManagedAssignments(context: AuthorizationContext): Record<string, unknown> {
+    if (this.isHod(context) && context.departmentId) {
+      return { OR: [{ assigneeUserId: context.userId }, { task: { departmentId: context.departmentId } }] };
+    }
+    return { assigneeUserId: context.userId };
   }
 
   async updateTask(id: string, input: UpdateTaskDto, context: AuthorizationContext): Promise<unknown> {
     this.requireAdminOrHod(context);
-    const before = (await this.getTask(id, context)) as { departmentId: string | null; assignments: { assigneeUserId: string }[] };
+    const before = (await this.getTask(id, context)) as { departmentId: string | null; canManage: boolean; assignments: { assigneeUserId: string }[] };
+    if (!before.canManage) denied();
 
     if (this.isHod(context) && !this.isAdmin(context) && input.departmentId) {
       if (input.departmentId !== this.hodDepartmentId(context)) denied();
@@ -238,7 +255,8 @@ export class TasksService {
 
   async assignTask(taskId: string, input: AssignTaskDto, context: AuthorizationContext): Promise<unknown> {
     this.requireAdminOrHod(context);
-    const task = await this.getTask(taskId, context) as Record<string, unknown>;
+    const { canManage, ...task } = await this.getTask(taskId, context) as Record<string, unknown> & { canManage: boolean };
+    if (!canManage) denied();
     await this.assertAssignable(input.assigneeUserId, context);
 
     let assignment;

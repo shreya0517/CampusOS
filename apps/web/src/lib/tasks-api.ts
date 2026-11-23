@@ -18,6 +18,8 @@ export type Task = {
   department: { id: string; name: string; code: string } | null;
   createdBy: { id: string; displayName: string };
   assignments: TaskAssignment[];
+  /** Set on a single task: whether you may assign, edit and review it (Admin, or the HOD of its department). */
+  canManage?: boolean;
 };
 
 export type TaskAssignment = {

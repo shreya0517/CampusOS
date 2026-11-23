@@ -493,6 +493,47 @@ describe('TasksService assignment boundaries', () => {
     database.taskAssignment.create.mockRejectedValue({ code: 'P2002' });
     await expect(service.assignTask('task-1', { assigneeUserId: 'own-faculty' }, hod)).rejects.toMatchObject({ response: { code: 'ALREADY_ASSIGNED' } });
   });
+
+  it('keeps an HOD from assigning on a task outside their department, even one assigned to them', async () => {
+    database.task.findFirst.mockResolvedValueOnce({ id: 'task-2', title: 'College report', departmentId: null });
+    database.user.findFirst.mockResolvedValue({ facultyProfiles: [{ departmentId: 'dept-1' }] });
+    await expect(service.assignTask('task-2', { assigneeUserId: 'own-faculty' }, hod)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(database.taskAssignment.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('TasksService tasks assigned to an HOD', () => {
+  const hod: AuthorizationContext = { userId: 'hod-1', collegeId: 'college-1', roles: ['HOD'], permissions: [], departmentId: 'dept-1' };
+  const database = { task: { findFirst: jest.fn(), update: jest.fn() } };
+  const service = new TasksService(database as unknown as DatabaseService, {} as EventsService);
+  const lastQuery = () => database.task.findFirst.mock.calls.at(-1)?.[0] as { where: Record<string, unknown>; include: { assignments: { where?: unknown } } };
+  beforeEach(() => jest.clearAllMocks());
+
+  it('opens their department tasks and any task assigned to them', async () => {
+    database.task.findFirst.mockResolvedValue({ id: 'task-1', departmentId: 'dept-1' });
+    await service.getTask('task-1', hod);
+    expect(lastQuery().where).toEqual({
+      id: 'task-1',
+      collegeId: 'college-1',
+      OR: [{ departmentId: 'dept-1' }, { assignments: { some: { assigneeUserId: 'hod-1', collegeId: 'college-1' } } }],
+    });
+    expect(lastQuery().include.assignments.where).toEqual({ OR: [{ assigneeUserId: 'hod-1' }, { task: { departmentId: 'dept-1' } }] });
+  });
+
+  it('manages their department tasks but only works on the ones from elsewhere', async () => {
+    database.task.findFirst.mockResolvedValueOnce({ id: 'task-1', departmentId: 'dept-1' });
+    await expect(service.getTask('task-1', hod)).resolves.toMatchObject({ canManage: true });
+    database.task.findFirst.mockResolvedValueOnce({ id: 'task-2', departmentId: 'dept-2' });
+    await expect(service.getTask('task-2', hod)).resolves.toMatchObject({ canManage: false });
+    database.task.findFirst.mockResolvedValueOnce({ id: 'task-3', departmentId: null });
+    await expect(service.getTask('task-3', hod)).resolves.toMatchObject({ canManage: false });
+  });
+
+  it('cannot edit a task from another department', async () => {
+    database.task.findFirst.mockResolvedValueOnce({ id: 'task-2', departmentId: 'dept-2', assignments: [{ assigneeUserId: 'hod-1' }] });
+    await expect(service.updateTask('task-2', { title: 'Changed' }, hod)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(database.task.update).not.toHaveBeenCalled();
+  });
 });
 
 describe('TasksController roles', () => {
