@@ -372,25 +372,41 @@ async function main(): Promise<void> {
   const classIds = new Map((await prisma.class.findMany({ where: { collegeId, sectionId: { in: sections.map((s) => s.id) } }, select: { id: true, sectionId: true, subjectId: true } })).map((row) => [`${row.sectionId}:${row.subjectId}`, row.id]));
   for (const cls of classes) cls.id = classIds.get(`${cls.section.id}:${cls.subject.id}`) ?? cls.id;
 
-  // Timetable: three periods a week per class, on different days, with no section or teacher double-booked. Each
+  // Timetable: three periods a week per class, on different days, with no section, teacher or room double-booked. Each
   // period goes on the day where the teacher, then the section, has the fewest classes, so nobody gets a packed day.
   const slots = WEEKDAYS.flatMap((weekday) => PERIODS.map((period, periodIndex) => ({ weekday, period, periodIndex })));
   const busy = new Set<string>();
   const load = new Map<string, number>();
   const meetings = new Map<string, number[]>();
+  const book = (keys: { section: string; faculty: string | null; room: string }, weekday: number, periodIndex: number): void => {
+    busy.add(`s:${keys.section}:${weekday}:${periodIndex}`);
+    busy.add(`r:${keys.room}:${weekday}:${periodIndex}`);
+    if (keys.faculty) busy.add(`f:${keys.faculty}:${weekday}:${periodIndex}`);
+    for (const key of [`f:${keys.faculty}:${weekday}`, `s:${keys.section}:${weekday}`]) load.set(key, (load.get(key) ?? 0) + 1);
+  };
+  // Whatever the college already has (made in the app, or by an earlier run) stays: a class with periods keeps them, and
+  // every period overlapping an existing booking of a section, teacher or room counts as taken.
+  const minutes = (time: Date): number => time.getUTCHours() * 60 + time.getUTCMinutes();
+  for (const row of await prisma.timetable.findMany({ where: { collegeId }, select: { classId: true, roomId: true, dayOfWeek: true, startsAt: true, endsAt: true, class: { select: { sectionId: true, facultyId: true } } } })) {
+    meetings.set(row.classId, [...(meetings.get(row.classId) ?? []), row.dayOfWeek]);
+    for (const [periodIndex, [hours, mins]] of PERIODS.entries()) {
+      const start = hours * 60 + mins;
+      if (start < minutes(row.endsAt) && minutes(row.startsAt) < start + 55) book({ section: row.class.sectionId, faculty: row.class.facultyId, room: row.roomId }, row.dayOfWeek, periodIndex);
+    }
+  }
   const timetableRows: Array<{ id: string; collegeId: string; classId: string; roomId: string; dayOfWeek: number; startsAt: Date; endsAt: Date }> = [];
   for (const [classIndex, cls] of classes.entries()) {
+    if (meetings.has(cls.id)) continue;
     const days: number[] = [];
+    const keys = { section: cls.section.id, faculty: cls.faculty.id, room: cls.section.roomId };
     while (days.length < MEETINGS_PER_WEEK) {
       const free = slots
         .map((slot, index) => ({ ...slot, order: (index + classIndex * 7) % slots.length }))
-        .filter((slot) => !days.includes(slot.weekday) && !busy.has(`s:${cls.section.id}:${slot.weekday}:${slot.periodIndex}`) && !busy.has(`f:${cls.faculty.id}:${slot.weekday}:${slot.periodIndex}`));
+        .filter((slot) => !days.includes(slot.weekday) && ['s', 'f', 'r'].every((kind) => !busy.has(`${kind}:${kind === 's' ? keys.section : kind === 'f' ? keys.faculty : keys.room}:${slot.weekday}:${slot.periodIndex}`)));
       const score = (slot: (typeof free)[number]) => (load.get(`f:${cls.faculty.id}:${slot.weekday}`) ?? 0) * 100 + (load.get(`s:${cls.section.id}:${slot.weekday}`) ?? 0) * 10 + slot.order / slots.length;
       const slot = free.sort((a, b) => score(a) - score(b))[0];
       if (!slot) throw new Error(`No free period left for ${cls.key}.`);
-      busy.add(`s:${cls.section.id}:${slot.weekday}:${slot.periodIndex}`);
-      busy.add(`f:${cls.faculty.id}:${slot.weekday}:${slot.periodIndex}`);
-      for (const key of [`f:${cls.faculty.id}:${slot.weekday}`, `s:${cls.section.id}:${slot.weekday}`]) load.set(key, (load.get(key) ?? 0) + 1);
+      book(keys, slot.weekday, slot.periodIndex);
       days.push(slot.weekday);
       timetableRows.push({
         id: `demo-tt-${cls.key.toLowerCase()}-${days.length}`,
