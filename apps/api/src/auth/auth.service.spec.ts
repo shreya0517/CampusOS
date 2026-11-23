@@ -1,5 +1,5 @@
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
-import { AuthService, hashPassword, LOGIN_FAILURE_LIMIT, RESET_REQUEST_LIMIT, verifyPassword } from './auth.service';
+import { AuthService, hashPassword, LOGIN_FAILURE_LIMIT, passwordResetEmail, RESET_REQUEST_LIMIT, shellQuote, verifyPassword } from './auth.service';
 import { getAuthConfig } from './auth.config';
 
 const activeUser = { id: 'user-1', collegeId: 'college-1', email: 'user@example.test', displayName: 'Test User', status: 'ACTIVE', emailVerifiedAt: new Date(), passwordHash: '' };
@@ -197,6 +197,8 @@ describe('AuthService', () => {
     await service.logout('refresh-token');
     await service.resetPassword({ token: 'reset-token', password: 'a-new-strong-password' });
     expect(database.authSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { revokedAt: expect.any(Date) } }));
+    // The account's other open reset links are voided with it.
+    expect(database.passwordResetToken.updateMany).toHaveBeenLastCalledWith({ where: { collegeId: activeUser.collegeId, userId: activeUser.id, usedAt: null }, data: { usedAt: expect.any(Date) } });
     database.authSession.findUnique.mockResolvedValue({ ...activeSession, revokedAt: new Date() });
     const token = (service as unknown as { createAccessToken(sub: string, collegeId: string, sid: string): string }).createAccessToken(activeUser.id, activeUser.collegeId, activeSession.id);
     await expect(service.authorizeAccessToken(token)).rejects.toBeInstanceOf(UnauthorizedException);
@@ -219,16 +221,74 @@ describe('AuthService', () => {
     await expect(service.resetPassword({ token: 'invalid-reset', password: 'a-new-strong-password' })).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('creates a reset record for an existing account and remains silent for unknown accounts', async () => {
-    const database = createDatabase();
-    database.college.findUnique.mockResolvedValue({ id: activeUser.collegeId });
-    database.user.findUnique.mockResolvedValue(activeUser);
-    database.passwordResetToken.create.mockResolvedValue({});
-    const service = new AuthService(database as never);
-    await expect(service.requestPasswordReset({ collegeCode: 'DEMO', email: activeUser.email })).resolves.toBeUndefined();
-    expect(database.passwordResetToken.create).toHaveBeenCalled();
-    database.user.findUnique.mockResolvedValue(null);
-    await expect(service.requestPasswordReset({ collegeCode: 'DEMO', email: 'missing@example.test' })).resolves.toBeUndefined();
+  describe('password reset delivery', () => {
+    const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+    const recipient = { ...activeUser, facultyProfiles: [{ id: 'faculty-1' }], studentProfiles: [] };
+    const setup = (mail?: { configured: boolean; send: jest.Mock }) => {
+      const database = { ...createDatabase(), user: { findUnique: jest.fn().mockResolvedValue(recipient), findMany: jest.fn().mockResolvedValue([{ id: 'admin-1' }]) } };
+      database.college.findUnique.mockResolvedValue({ id: 'college-1', code: 'DEMO', name: 'Demo College' });
+      database.passwordResetToken.create.mockResolvedValue({});
+      const notifications = { notify: jest.fn() };
+      return { database, notifications, service: new AuthService(database as never, mail as never, notifications as never) };
+    };
+    afterEach(() => { delete process.env.APP_URL; });
+
+    it('emails a reset link to the web app when SMTP is set up', async () => {
+      process.env.APP_URL = 'https://campus.example/';
+      const mail = { configured: true, send: jest.fn().mockResolvedValue(undefined) };
+      const { database, notifications, service } = setup(mail);
+      expect(service.passwordResetDelivery()).toBe('email');
+      await expect(service.requestPasswordReset({ collegeCode: 'DEMO', email: activeUser.email })).resolves.toBeUndefined();
+      await flush();
+      expect(database.passwordResetToken.create).toHaveBeenCalled();
+      expect(mail.send).toHaveBeenCalledWith(expect.objectContaining({ to: activeUser.email, subject: 'Reset your CampusOS password', text: expect.stringMatching(/https:\/\/campus\.example\/reset-password\?token=[\w-]+/) }));
+      expect(notifications.notify).not.toHaveBeenCalled();
+    });
+
+    it('tells the college Admins instead when there is no email', async () => {
+      const { database, notifications, service } = setup();
+      expect(service.passwordResetDelivery()).toBe('admin');
+      await service.requestPasswordReset({ collegeCode: 'DEMO', email: activeUser.email });
+      await flush();
+      expect(database.user.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { collegeId: 'college-1', status: 'ACTIVE', id: { not: 'user-1' }, userRoles: { some: { role: { name: 'ADMIN' } } } } }));
+      expect(notifications.notify).toHaveBeenCalledWith('college-1', ['admin-1'], expect.objectContaining({ category: 'ACCOUNT', link: '/dashboard/faculty/faculty-1' }));
+      // Nothing to deliver a link with, so none is made.
+      expect(database.passwordResetToken.create).not.toHaveBeenCalled();
+    });
+
+    it('points the Admins to the server command for an account with no record to reset it from', async () => {
+      const { database, notifications, service } = setup();
+      database.user.findUnique.mockResolvedValue({ ...recipient, facultyProfiles: [], studentProfiles: [] });
+      await service.requestPasswordReset({ collegeCode: 'DEMO', email: activeUser.email });
+      await flush();
+      expect(notifications.notify).toHaveBeenCalledWith('college-1', ['admin-1'], expect.objectContaining({
+        link: null,
+        body: expect.stringContaining(`pnpm --filter @campusos/db account:reset-password 'DEMO' '${activeUser.email}'`),
+      }));
+    });
+
+    it('quotes shell characters in the recovery command', () => {
+      expect(shellQuote("o'neil$(touch x)`id`@example.test")).toBe(`'o'"'"'neil$(touch x)\`id\`@example.test'`);
+    });
+
+    it('does nothing for an unknown or deactivated account', async () => {
+      const mail = { configured: true, send: jest.fn() };
+      const { database, notifications, service } = setup(mail);
+      database.user.findUnique.mockResolvedValueOnce({ ...recipient, status: 'INACTIVE' }).mockResolvedValueOnce(null);
+      await service.requestPasswordReset({ collegeCode: 'DEMO', email: activeUser.email });
+      await service.requestPasswordReset({ collegeCode: 'DEMO', email: 'missing@example.test' });
+      await flush();
+      expect(database.passwordResetToken.create).not.toHaveBeenCalled();
+      expect(mail.send).not.toHaveBeenCalled();
+      expect(notifications.notify).not.toHaveBeenCalled();
+    });
+
+    it('escapes the name and college in the email', () => {
+      const email = passwordResetEmail({ email: 'eve@example.test', displayName: '<b>Eve</b>' }, 'A & B College', 'token-1');
+      expect(email.html).not.toContain('<b>Eve');
+      expect(email.html).toContain('&#60;b&#62;Eve&#60;/b&#62;');
+      expect(email.html).toContain('A &#38; B College');
+    });
   });
 
   describe('changePassword', () => {

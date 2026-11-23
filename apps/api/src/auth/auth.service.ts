@@ -1,7 +1,9 @@
-import { BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus, Inject, Injectable, Logger, Optional, UnauthorizedException } from '@nestjs/common';
 import { createHmac, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { DatabaseService } from '../database.service';
+import { MailService } from '../mail/mail.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { getAuthConfig } from './auth.config';
 import { AttemptLimiter } from './attempt-limiter';
 import type { ChangePasswordDto, ForgotPasswordDto, LoginDto, RegisterDto, ResetPasswordDto } from './auth.dto';
@@ -35,6 +37,28 @@ export const REFRESH_REUSE_GRACE_MS = 30_000;
 
 export type PublicUser = { id: string; collegeId: string; email: string; displayName: string; emailVerified: boolean; roles: string[] };
 type SessionResult = { accessToken: string; refreshToken: string; user: PublicUser };
+type ResetRecipient = { id: string; collegeId: string; email: string; displayName: string; facultyProfiles: { id: string }[]; studentProfiles: { id: string }[] };
+
+/** The reset link goes to the web app's /reset-password page (APP_URL) and works for an hour, once. */
+export const passwordResetEmail = (user: { email: string; displayName: string }, collegeName: string, token: string): { to: string; subject: string; text: string; html: string } => {
+  const link = `${(process.env.APP_URL ?? 'http://localhost:3000').replace(/\/+$/, '')}/reset-password?token=${encodeURIComponent(token)}`;
+  const text = [
+    `Hi ${user.displayName},`,
+    '',
+    `Someone asked to reset the password for your ${collegeName} CampusOS account (${user.email}).`,
+    'Open this link within an hour to choose a new password:',
+    link,
+    '',
+    "If you didn't ask for this, ignore this email. Your password stays the same.",
+  ].join('\n');
+  const html = `<p>Hi ${escapeHtml(user.displayName)},</p><p>Someone asked to reset the password for your ${escapeHtml(collegeName)} CampusOS account (${escapeHtml(user.email)}).</p><p><a href="${escapeHtml(link)}">Choose a new password</a> (the link works for an hour).</p><p>If you didn't ask for this, ignore this email. Your password stays the same.</p>`;
+  return { to: user.email, subject: 'Reset your CampusOS password', text, html };
+};
+
+const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, (character) => `&#${character.charCodeAt(0)};`);
+
+/** A single-quoted shell argument, so a command shown to an Admin runs the address as text, whatever characters it has. */
+export const shellQuote = (value: string): string => `'${value.replace(/'/g, `'"'"'`)}'`;
 
 @Injectable()
 export class AuthService {
@@ -42,7 +66,18 @@ export class AuthService {
   private readonly loginFailures = new AttemptLimiter(LOGIN_FAILURE_LIMIT, LOGIN_FAILURE_WINDOW_MS);
   private readonly resetRequests = new AttemptLimiter(RESET_REQUEST_LIMIT, RESET_REQUEST_WINDOW_MS);
 
-  constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
+  private readonly logger = new Logger(AuthService.name);
+
+  constructor(
+    @Inject(DatabaseService) private readonly database: DatabaseService,
+    @Optional() @Inject(MailService) private readonly mail?: MailService,
+    @Optional() @Inject(NotificationsService) private readonly notifications?: NotificationsService,
+  ) {}
+
+  /** How a forgotten password reaches its owner: a reset link by email when SMTP is set up, otherwise through an Admin. */
+  passwordResetDelivery(): 'email' | 'admin' {
+    return this.mail?.configured ? 'email' : 'admin';
+  }
 
   /**
    * Public sign-up, off by default: Admins create student and faculty accounts, and a self-registered account would
@@ -155,17 +190,48 @@ export class AuthService {
     });
   }
 
-  /** Limited per account (RESET_REQUEST_LIMIT an hour), whether or not the account exists, so the limit reveals nothing. */
+  /**
+   * Limited per account (RESET_REQUEST_LIMIT an hour), whether or not the account exists, so the limit reveals nothing.
+   * Only active accounts get a reset. Delivery runs after the response, so how long it takes reveals nothing either.
+   */
   async requestPasswordReset(input: ForgotPasswordDto): Promise<void> {
     if (!isNonEmpty(input.collegeCode) || !isEmail(input.email)) return;
     const wait = this.resetRequests.take(accountKey(input.collegeCode, input.email));
     if (wait) tooMany(wait, 'password reset requests');
     const college = await this.database.college.findUnique({ where: { code: input.collegeCode.trim() } });
-    const user = college ? await this.database.user.findUnique({ where: { collegeId_email: { collegeId: college.id, email: input.email.trim().toLowerCase() } } }) : null;
-    if (user) {
+    const user = college
+      ? await this.database.user.findUnique({
+          where: { collegeId_email: { collegeId: college.id, email: input.email.trim().toLowerCase() } },
+          select: { id: true, collegeId: true, email: true, displayName: true, status: true, facultyProfiles: { select: { id: true } }, studentProfiles: { select: { id: true } } },
+        })
+      : null;
+    if (!college || !user || user.status !== 'ACTIVE') return;
+    // No address in the log, so account details stay out of the log sink.
+    void this.deliverPasswordReset(user, college).catch((error: unknown) => this.logger.error(`A password reset was not delivered: ${(error as Error).message}`));
+  }
+
+  private async deliverPasswordReset(user: ResetRecipient, college: { code: string; name: string }): Promise<void> {
+    if (this.passwordResetDelivery() === 'email') {
       const resetToken = await this.createPasswordResetToken(user.collegeId, user.id);
       this.logDevelopmentPasswordReset(user.email, resetToken);
+      await this.mail!.send(passwordResetEmail(user, college.name, resetToken));
+      return;
     }
+    if (getAuthConfig().logTokens) this.logDevelopmentPasswordReset(user.email, await this.createPasswordResetToken(user.collegeId, user.id));
+    // No email: the college's Admins hear about it and issue a temporary password from the person's record.
+    const admins = await this.database.user.findMany({
+      where: { collegeId: user.collegeId, status: 'ACTIVE', id: { not: user.id }, userRoles: { some: { role: { name: 'ADMIN' } } } },
+      select: { id: true },
+    });
+    const record = user.facultyProfiles[0] ? `/dashboard/faculty/${user.facultyProfiles[0].id}` : user.studentProfiles[0] ? `/dashboard/students/${user.studentProfiles[0].id}` : null;
+    await this.notifications?.notify(user.collegeId, admins.map((admin) => admin.id), {
+      category: 'ACCOUNT',
+      title: `Password reset requested: ${user.displayName}`,
+      body: record
+        ? `${user.displayName} (${user.email}) can't sign in and asked for a new password. Open their record and choose Reset password to issue a temporary one.`
+        : `${user.displayName} (${user.email}) can't sign in and asked for a new password. This account has no faculty or student record, so reset it on the server: pnpm --filter @campusos/db account:reset-password ${shellQuote(college.code)} ${shellQuote(user.email)}`,
+      link: record,
+    });
   }
 
   async resetPassword(input: ResetPasswordDto): Promise<void> {
@@ -181,6 +247,8 @@ export class AuthService {
       if (consumption.count !== 1) throw new BadRequestException({ code: 'INVALID_RESET', message: 'Reset link or password is invalid.' });
       await transaction.user.update({ where: { collegeId_id: { collegeId: record.collegeId, id: record.userId } }, data: { passwordHash } });
       await transaction.authSession.updateMany({ where: { collegeId: record.collegeId, userId: record.userId, revokedAt: null }, data: { revokedAt: new Date() } });
+      // Any other link sent to this account stops working too, so an older or forwarded one can't change the password again.
+      await transaction.passwordResetToken.updateMany({ where: { collegeId: record.collegeId, userId: record.userId, usedAt: null }, data: { usedAt: new Date() } });
     });
   }
 

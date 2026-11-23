@@ -12,7 +12,7 @@ import { Dialog } from '@/components/ui/interactive';
 import { AccountBadge } from '@/components/students/account-badge';
 import { TemporaryPasswordNotice } from '@/components/accounts/temporary-password-notice';
 import { StudentRecordSections } from '@/components/students/student-record-sections';
-import { createStudentAccount, getStudent, getStudentRecord, setStudentAccountStatus, updateEnrollment, updateStudent } from '@/lib/student-api';
+import { createStudentAccount, getStudent, getStudentRecord, resetStudentPassword, setStudentAccountStatus, updateEnrollment, updateStudent } from '@/lib/student-api';
 import type { Student, StudentRecord } from '@/lib/student-api';
 
 export default function StudentDetailsPage() {
@@ -30,7 +30,8 @@ export default function StudentDetailsPage() {
   const [saving, setSaving] = useState(false);
   const [confirmingAccount, setConfirmingAccount] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
-  const [issued, setIssued] = useState<{ email: string; password: string } | null>(null);
+  const [confirmingReset, setConfirmingReset] = useState(false);
+  const [issued, setIssued] = useState<{ email: string; password: string; title?: string } | null>(null);
 
   const load = async () => {
     try {
@@ -58,6 +59,22 @@ export default function StudentDetailsPage() {
       setConfirmingAccount(false);
     } catch (reason) {
       setAccountError(reason instanceof Error ? reason.message : 'The account could not be updated.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // For a student who forgot their password while the college has no email set up: a new temporary one, shown once.
+  const resetPassword = async () => {
+    setSaving(true);
+    setAccountError(null);
+    try {
+      const result = await resetStudentPassword(params.id);
+      setStudent(result);
+      setIssued({ email: result.account?.email ?? '', password: result.temporaryPassword, title: 'Password reset' });
+      setConfirmingReset(false);
+    } catch (reason) {
+      setAccountError(reason instanceof Error ? reason.message : 'The password could not be reset.');
     } finally {
       setSaving(false);
     }
@@ -91,19 +108,24 @@ export default function StudentDetailsPage() {
             </p>
           </div>
           {isAdmin && student.account && (
-            <Button variant={student.account.status === 'ACTIVE' ? 'outline' : 'primary'} onClick={() => (student.account?.status === 'ACTIVE' ? setConfirmingAccount(true) : void changeAccountStatus('ACTIVE'))} loading={saving && !confirmingAccount}>
-              {student.account.status === 'ACTIVE' ? 'Deactivate account' : 'Activate account'}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => { setAccountError(null); setConfirmingReset(true); }}>
+                Reset password
+              </Button>
+              <Button variant={student.account.status === 'ACTIVE' ? 'outline' : 'primary'} onClick={() => (student.account?.status === 'ACTIVE' ? setConfirmingAccount(true) : void changeAccountStatus('ACTIVE'))} loading={saving && !confirmingAccount && !confirmingReset}>
+                {student.account.status === 'ACTIVE' ? 'Deactivate account' : 'Activate account'}
+              </Button>
+            </div>
           )}
         </div>
-        {accountError && !confirmingAccount && (
+        {accountError && !confirmingAccount && !confirmingReset && (
           <p role="alert" className="mt-3 text-sm text-[hsl(var(--destructive))]">
             {accountError}
           </p>
         )}
         {issued && (
           <div className="mt-4">
-            <TemporaryPasswordNotice email={issued.email} password={issued.password} who="the student" />
+            <TemporaryPasswordNotice email={issued.email} password={issued.password} who="the student" title={issued.title} />
           </div>
         )}
         {isAdmin && student.account === null && !issued && (
@@ -152,6 +174,26 @@ export default function StudentDetailsPage() {
           </Button>
           <Button variant="destructive" loading={saving} onClick={() => void changeAccountStatus('INACTIVE')}>
             Deactivate
+          </Button>
+        </div>
+      </Dialog>
+      <Dialog
+        open={confirmingReset}
+        title="Reset this password?"
+        description={`${student.firstName} ${student.lastName} gets a new temporary password and is signed out everywhere. You'll see it once, to hand over; they can then choose their own under Settings.`}
+        onClose={() => setConfirmingReset(false)}
+      >
+        {accountError && (
+          <p role="alert" className="mb-3 text-sm text-[hsl(var(--destructive))]">
+            {accountError}
+          </p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setConfirmingReset(false)}>
+            Cancel
+          </Button>
+          <Button loading={saving} onClick={() => void resetPassword()}>
+            Reset password
           </Button>
         </div>
       </Dialog>

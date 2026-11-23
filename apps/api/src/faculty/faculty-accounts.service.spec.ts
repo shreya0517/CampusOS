@@ -36,6 +36,7 @@ function createDatabase() {
     role: { upsert: jest.fn().mockResolvedValue({ id: 'role-faculty' }) },
     userRole: { create: jest.fn() },
     authSession: { updateMany: jest.fn() },
+    passwordResetToken: { updateMany: jest.fn() },
     auditLog: { create: jest.fn() },
     $transaction: jest.fn(),
   };
@@ -110,6 +111,24 @@ describe('FacultyService accounts and designation', () => {
 
     database.faculty.findFirst.mockResolvedValueOnce({ id: 'faculty-a', userId: 'admin' });
     await expect(service.setAccountStatus('faculty-a', { status: 'INACTIVE' }, admin)).rejects.toMatchObject({ response: { code: 'OWN_ACCOUNT' } });
+  });
+
+  it('issues a new temporary password, signs the person out and voids open reset links, for admins only', async () => {
+    const database = createDatabase();
+    const service = new FacultyService(database as never);
+    const result = await service.resetAccountPassword('faculty-a', admin);
+    const update = database.user.update.mock.calls[0]?.[0] as { where: unknown; data: { passwordHash: string } };
+    expect(update.where).toEqual({ collegeId_id: { collegeId: 'college-a', id: 'user-priya' } });
+    await expect(verifyPassword(result.temporaryPassword, update.data.passwordHash)).resolves.toBe(true);
+    expect(database.authSession.updateMany).toHaveBeenCalledWith({ where: { collegeId: 'college-a', userId: 'user-priya', revokedAt: null }, data: { revokedAt: expect.any(Date) } });
+    expect(database.passwordResetToken.updateMany).toHaveBeenCalledWith({ where: { collegeId: 'college-a', userId: 'user-priya', usedAt: null }, data: { usedAt: expect.any(Date) } });
+    expect(database.auditLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({ action: 'FACULTY_ACCOUNT_PASSWORD_RESET', actorId: 'admin', entityId: 'faculty-a' }) });
+
+    await expect(service.resetAccountPassword('faculty-a', hod)).rejects.toBeInstanceOf(ForbiddenException);
+    database.faculty.findFirst.mockResolvedValueOnce({ id: 'faculty-a', userId: null });
+    await expect(service.resetAccountPassword('faculty-a', admin)).rejects.toMatchObject({ response: { code: 'NO_ACCOUNT' } });
+    database.faculty.findFirst.mockResolvedValueOnce({ id: 'faculty-a', userId: 'admin' });
+    await expect(service.resetAccountPassword('faculty-a', admin)).rejects.toMatchObject({ response: { code: 'OWN_ACCOUNT' } });
   });
 
   it('shows account details to admins and HODs, not to faculty', async () => {

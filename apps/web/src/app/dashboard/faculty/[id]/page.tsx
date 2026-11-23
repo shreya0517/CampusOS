@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input, Select } from '@/components/ui/form-field';
 import { Dialog } from '@/components/ui/interactive';
 import { Table, TableCell, TableHead } from '@/components/ui/table';
-import { createFacultyAccount, getFaculty, listDepartments, setFacultyAccountStatus, updateFaculty } from '@/lib/faculty-api';
+import { createFacultyAccount, getFaculty, listDepartments, resetFacultyPassword, setFacultyAccountStatus, updateFaculty } from '@/lib/faculty-api';
 import type { Department, Faculty } from '@/lib/faculty-api';
 
 export default function FacultyDetailPage() {
@@ -31,7 +31,8 @@ export default function FacultyDetailPage() {
   const [accountError, setAccountError] = useState<string | null>(null);
   const [accountBusy, setAccountBusy] = useState(false);
   const [confirmingDeactivate, setConfirmingDeactivate] = useState(false);
-  const [issued, setIssued] = useState<{ email: string; password: string } | null>(null);
+  const [confirmingReset, setConfirmingReset] = useState(false);
+  const [issued, setIssued] = useState<{ email: string; password: string; title?: string } | null>(null);
 
   const load = async (): Promise<void> => {
     try {
@@ -61,6 +62,22 @@ export default function FacultyDetailPage() {
       setConfirmingDeactivate(false);
     } catch (reason) {
       setAccountError(reason instanceof Error ? reason.message : 'The account could not be updated.');
+    } finally {
+      setAccountBusy(false);
+    }
+  };
+
+  // For someone who forgot their password while the college has no email set up: a new temporary one, shown once.
+  const resetPassword = async () => {
+    setAccountBusy(true);
+    setAccountError(null);
+    try {
+      const result = await resetFacultyPassword(faculty.id);
+      setFaculty(result);
+      setIssued({ email: result.account?.email ?? faculty.account?.email ?? '', password: result.temporaryPassword, title: 'Password reset' });
+      setConfirmingReset(false);
+    } catch (reason) {
+      setAccountError(reason instanceof Error ? reason.message : 'The password could not be reset.');
     } finally {
       setAccountBusy(false);
     }
@@ -175,20 +192,25 @@ export default function FacultyDetailPage() {
               <CardDescription>Deactivating signs the person out everywhere and blocks sign-in; their records stay.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
-              {issued && <TemporaryPasswordNotice email={issued.email} password={issued.password} who="the faculty member" />}
+              {issued && <TemporaryPasswordNotice email={issued.email} password={issued.password} who="the faculty member" title={issued.title} />}
               {faculty.account ? (
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="text-sm">
                     <p className="font-medium">{faculty.account.email}</p>
                     <p className="text-[hsl(var(--muted-foreground))]">{faculty.account.status === 'ACTIVE' ? 'Can sign in' : 'Sign-in blocked'}</p>
                   </div>
-                  <Button
-                    variant={faculty.account.status === 'ACTIVE' ? 'outline' : 'primary'}
-                    loading={accountBusy && !confirmingDeactivate}
-                    onClick={() => (faculty.account?.status === 'ACTIVE' ? setConfirmingDeactivate(true) : void changeStatus('ACTIVE'))}
-                  >
-                    {faculty.account.status === 'ACTIVE' ? 'Deactivate account' : 'Activate account'}
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" onClick={() => { setAccountError(null); setConfirmingReset(true); }}>
+                      Reset password
+                    </Button>
+                    <Button
+                      variant={faculty.account.status === 'ACTIVE' ? 'outline' : 'primary'}
+                      loading={accountBusy && !confirmingDeactivate && !confirmingReset}
+                      onClick={() => (faculty.account?.status === 'ACTIVE' ? setConfirmingDeactivate(true) : void changeStatus('ACTIVE'))}
+                    >
+                      {faculty.account.status === 'ACTIVE' ? 'Deactivate account' : 'Activate account'}
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <form
@@ -216,7 +238,7 @@ export default function FacultyDetailPage() {
                   </Button>
                 </form>
               )}
-              {accountError && !confirmingDeactivate && (
+              {accountError && !confirmingDeactivate && !confirmingReset && (
                 <p role="alert" className="text-sm text-[hsl(var(--destructive))]">
                   {accountError}
                 </p>
@@ -287,6 +309,27 @@ export default function FacultyDetailPage() {
           </Button>
           <Button variant="destructive" loading={accountBusy} onClick={() => void changeStatus('INACTIVE')}>
             Deactivate
+          </Button>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={confirmingReset}
+        title="Reset this password?"
+        description={`${faculty.firstName} ${faculty.lastName} gets a new temporary password and is signed out everywhere. You'll see it once, to hand over; they can then choose their own under Settings.`}
+        onClose={() => setConfirmingReset(false)}
+      >
+        {accountError && (
+          <p role="alert" className="mb-3 text-sm text-[hsl(var(--destructive))]">
+            {accountError}
+          </p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setConfirmingReset(false)}>
+            Cancel
+          </Button>
+          <Button loading={accountBusy} onClick={() => void resetPassword()}>
+            Reset password
           </Button>
         </div>
       </Dialog>

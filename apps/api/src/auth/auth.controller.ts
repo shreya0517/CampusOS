@@ -18,6 +18,8 @@ export class AuthController {
   @Post('logout') @HttpCode(204) async logout(@Req() request: RequestLike, @Res({ passthrough: true }) response: ResponseLike): Promise<void> { await this.auth.logout(parseCookies(request.headers.cookie)[getRefreshCookieName()]); response.setHeader('Set-Cookie', createRefreshCookie('', 0)); }
   @Post('verify-email') @HttpCode(204) async verifyEmail(@Body() body: unknown): Promise<void> { await this.auth.verifyEmail(parseTokenDto(body)); }
   @Post('forgot-password') @HttpCode(204) async forgotPassword(@Body() body: unknown): Promise<void> { await this.auth.requestPasswordReset(parseForgotPasswordDto(body)); }
+  /** Tells the forgot-password page how a reset reaches the person: by email, or through their college's Admin. */
+  @Get('password-reset-options') passwordResetOptions() { return { delivery: this.auth.passwordResetDelivery() }; }
   @Post('reset-password') @HttpCode(204) async resetPassword(@Body() body: unknown): Promise<void> { await this.auth.resetPassword(parseResetPasswordDto(body)); }
   @Get('me') @UseGuards(AccessAuthGuard) me(@CurrentUser() user: PublicUser) { return { user }; }
   @Post('change-password') @HttpCode(204) @UseGuards(AccessAuthGuard) async changePassword(@Req() request: RequestLike, @Body() body: unknown): Promise<void> { await this.auth.changePassword(request.headers.authorization?.match(/^Bearer (.+)$/)?.[1] ?? '', parseChangePasswordDto(body)); }
