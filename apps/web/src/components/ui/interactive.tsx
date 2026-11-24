@@ -9,6 +9,12 @@ export function Dialog({ open, title, description, onClose, children }: { open: 
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
   const descriptionId = useId();
+  // Callers pass a new onClose on every render. Keeping the latest one in a ref means the focus setup below runs only
+  // when the dialog opens, not on every keystroke in one of its fields (which moved focus to the Close button).
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -16,7 +22,7 @@ export function Dialog({ open, title, description, onClose, children }: { open: 
     const focusable = dialogRef.current?.querySelector<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
     focusable?.focus();
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') onCloseRef.current();
       if (event.key !== 'Tab' || !dialogRef.current) return;
       const items = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'));
       if (!items.length) return;
@@ -27,7 +33,7 @@ export function Dialog({ open, title, description, onClose, children }: { open: 
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => { window.removeEventListener('keydown', handleKeyDown); returnFocusRef.current?.focus(); };
-  }, [onClose, open]);
+  }, [open]);
 
   if (!open) return null;
   return <div className="fixed inset-0 z-30 grid place-items-center bg-black/40 p-4" onMouseDown={onClose}><section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={description ? descriptionId : undefined} className="w-full max-w-lg rounded-[var(--radius)] bg-[hsl(var(--card))] p-5 shadow-xl" onMouseDown={(event) => event.stopPropagation()}><div className="flex items-start justify-between gap-4"><div><h2 id={titleId} className="text-lg font-semibold">{title}</h2>{description && <p id={descriptionId} className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">{description}</p>}</div><button className="text-sm font-semibold" aria-label="Close dialog" onClick={onClose}>Close</button></div><div className="mt-5">{children}</div></section></div>;
