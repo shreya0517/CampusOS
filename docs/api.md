@@ -195,11 +195,12 @@ FACULTY responses leave out phone and address; ADMIN and HOD receive them. HOD a
 
 - POST /api/v1/faculty and PUT /api/v1/faculty/:id: ADMIN only (HOD decision 2). PUT /api/v1/departments/:id: ADMIN only.
 
+- POST /api/v1/tasks and PUT /api/v1/tasks/:id: the deadline must be in the future (400 DEADLINE_IN_PAST); an edit that leaves an overdue task's deadline as it is still goes through. A `departmentId` must be one of the college's departments (404 DEPARTMENT_NOT_FOUND).
 - POST /api/v1/tasks/:id/assign: the assignee must be an active HOD or FACULTY account in the college (otherwise 400 INVALID_ASSIGNEE). An HOD may only assign to faculty in their own department (403), and assigning the same person twice returns 409 ALREADY_ASSIGNED.
 - GET /api/v1/tasks/:id: ADMIN and HOD get every assignment of the task; anyone else on it gets only their own assignment, without the other assignees' emails or submissions.
 - Task workflow:
   - PUT /api/v1/tasks/assignments/:id/status: the assignee can only start (PENDING to IN_PROGRESS) or resume after rework (REWORK to IN_PROGRESS); anything else is 400 INVALID_STATUS_TRANSITION. It no longer takes `notes`, which hold the assigner's instructions.
-  - POST /api/v1/tasks/assignments/:id/submit: only from IN_PROGRESS or REWORK (409 INVALID_STATUS_TRANSITION otherwise), so approved work can't be reopened. Each submission writes a TASK_SUBMITTED audit entry with its content, since a resubmission replaces the stored content.
+  - POST /api/v1/tasks/assignments/:id/submit: only from IN_PROGRESS or REWORK (409 INVALID_STATUS_TRANSITION otherwise), so approved work can't be reopened. Each submission writes a TASK_SUBMITTED audit entry with its content, since a resubmission replaces the stored content. The task's creator and the HOD(s) of its department are notified (not the submitter).
   - PUT /api/v1/tasks/assignments/:id/review: only while SUBMITTED. The reviewer's notes go in `reviewNotes`, leaving the instructions in `notes`, and each review writes a TASK_REVIEWED audit entry with the decision and notes.
   - Every one of these writes applies only if the assignment is still in the state it was read in. Otherwise it returns 409 TASK_STATUS_CHANGED, so two reviewers, or a review and a resubmission, can't overwrite each other.
 - A task's `status` sums up its assignments, and is worked out again whenever one is assigned, started, submitted or reviewed (with the task row locked):

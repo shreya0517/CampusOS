@@ -43,6 +43,17 @@ const statusChanged = (): never => {
 const assignmentMissing = (): never => {
   throw new NotFoundException({ code: 'TASK_ASSIGNMENT_NOT_FOUND', message: 'Task assignment was not found.' });
 };
+const departmentMissing = (): never => {
+  throw new NotFoundException({ code: 'DEPARTMENT_NOT_FOUND', message: 'Department not found.' });
+};
+/** A minute's leeway, so a deadline picked for "now" isn't refused because the browser's clock is slightly behind. */
+const DEADLINE_LEEWAY_MS = 60_000;
+const assertFutureDeadline = (deadline: Date): void => {
+  if (deadline.getTime() < Date.now() - DEADLINE_LEEWAY_MS) {
+    throw new BadRequestException({ code: 'DEADLINE_IN_PAST', message: 'The deadline must be in the future.' });
+  }
+};
+const formatDate = (value: string | Date): string => new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 
 const taskInclude = {
   department: true,
@@ -86,14 +97,23 @@ export class TasksService {
     return context.departmentId!;
   }
 
+  /** A department id from the request must be one of this college's departments. */
+  private async assertDepartmentInCollege(departmentId: string, context: AuthorizationContext): Promise<void> {
+    const department = await this.database.department.findFirst({ where: { id: departmentId, collegeId: context.collegeId }, select: { id: true } });
+    if (!department) departmentMissing();
+  }
+
   async createTask(input: CreateTaskDto, context: AuthorizationContext): Promise<unknown> {
     this.requireAdminOrHod(context);
+    assertFutureDeadline(input.deadline);
 
     let departmentId = input.departmentId;
     if (this.isHod(context) && !this.isAdmin(context)) {
       const hodDept = this.hodDepartmentId(context);
       if (departmentId && departmentId !== hodDept) denied();
       departmentId = hodDept;
+    } else if (departmentId) {
+      await this.assertDepartmentInCollege(departmentId, context);
     }
 
     const task = await this.database.task.create({
@@ -206,11 +226,16 @@ export class TasksService {
 
   async updateTask(id: string, input: UpdateTaskDto, context: AuthorizationContext): Promise<unknown> {
     this.requireAdminOrHod(context);
-    const before = (await this.getTask(id, context)) as { departmentId: string | null; canManage: boolean; assignments: { assigneeUserId: string }[] };
+    const before = (await this.getTask(id, context)) as { departmentId: string | null; deadline: string | Date; canManage: boolean; assignments: { assigneeUserId: string }[] };
     if (!before.canManage) denied();
+
+    // An overdue task can still be edited; only a deadline being moved has to be in the future.
+    if (input.deadline !== undefined && input.deadline.getTime() !== new Date(before.deadline).getTime()) assertFutureDeadline(input.deadline);
 
     if (this.isHod(context) && !this.isAdmin(context) && input.departmentId) {
       if (input.departmentId !== this.hodDepartmentId(context)) denied();
+    } else if (input.departmentId && input.departmentId !== before.departmentId) {
+      await this.assertDepartmentInCollege(input.departmentId, context);
     }
 
     const updated = await this.database.task.update({
@@ -288,10 +313,11 @@ export class TasksService {
       input.assigneeUserId,
     );
     const assigned = task as { title?: string; deadline?: string | Date };
+    const overdue = assigned.deadline !== undefined && new Date(assigned.deadline).getTime() < Date.now();
     await this.notifications?.notify(context.collegeId, [input.assigneeUserId], {
       category: 'TASK',
       title: `New task: ${assigned.title ?? 'Untitled task'}`,
-      body: assigned.deadline ? `Due ${new Date(assigned.deadline).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}.` : 'A new task has been assigned to you.',
+      body: assigned.deadline ? `${overdue ? 'Overdue since' : 'Due'} ${formatDate(assigned.deadline)}.` : 'A new task has been assigned to you.',
       link: `/dashboard/tasks/${taskId}`,
     });
 
@@ -375,13 +401,17 @@ export class TasksService {
       context.collegeId,
       existing!.task.departmentId,
     );
-    // The person who created the task reviews it.
+    // Everyone who can review it hears about it: whoever created the task, and the HOD(s) of its department, who
+    // manage (and usually assigned) the department's tasks even when an Admin created them.
     const submitter = (updated as { assignee?: { displayName?: string } }).assignee?.displayName ?? 'The assignee';
-    await this.notifications?.notify(context.collegeId, [existing!.task.createdByUserId].filter((id) => id !== context.userId), {
-      category: 'TASK',
-      title: `Task submitted for review: ${existing!.task.title}`,
-      body: `${submitter} submitted their work.`,
-      link: `/dashboard/tasks/${existing!.task.id}`,
+    await this.notifications?.safely(async (notifications) => {
+      const reviewers = [existing!.task.createdByUserId, ...(await notifications.hodsOf(context.collegeId, existing!.task.departmentId))];
+      await notifications.notify(context.collegeId, reviewers.filter((id) => id !== context.userId), {
+        category: 'TASK',
+        title: `Task submitted for review: ${existing!.task.title}`,
+        body: `${submitter} submitted their work.`,
+        link: `/dashboard/tasks/${existing!.task.id}`,
+      });
     });
 
     return updated;

@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState, ErrorState, Skeleton } from '@/components/feedback/states';
 import { Table, TableCell, TableHead } from '@/components/ui/table';
 import { listTasks, listMyAssignments, type Task, type TaskAssignment } from '@/lib/tasks-api';
+import { TaskDeadline } from '@/components/tasks/task-deadline';
 import { useTaskEvents, TASK_EVENTS } from '@/lib/use-socket';
 
 const PRIORITY_BADGE: Record<string, string> = {
@@ -131,7 +132,7 @@ export default function TasksPage() {
                         <TableCell><Badge value={a.task?.priority ?? 'MEDIUM'} map={PRIORITY_BADGE} /></TableCell>
                         <TableCell><Badge value={a.status} map={STATUS_BADGE} /></TableCell>
                         <TableCell>
-                          {a.task?.deadline ? new Date(a.task.deadline).toLocaleDateString('en-IN') : '—'}
+                          {a.task?.deadline ? <TaskDeadline deadline={a.task.deadline} status={a.status} /> : '—'}
                         </TableCell>
                         <TableCell>
                           <Link href={`/dashboard/tasks/${a.taskId}`}>
@@ -185,7 +186,7 @@ export default function TasksPage() {
                           <TableCell><Badge value={task.priority} map={PRIORITY_BADGE} /></TableCell>
                           <TableCell><Badge value={task.status} map={STATUS_BADGE} /></TableCell>
                           <TableCell>{task.department?.name ?? '—'}</TableCell>
-                          <TableCell>{new Date(task.deadline).toLocaleDateString('en-IN')}</TableCell>
+                          <TableCell><TaskDeadline deadline={task.deadline} status={task.status} /></TableCell>
                           <TableCell>{task.assignments.length}</TableCell>
                           <TableCell>
                             <Link href={`/dashboard/tasks/${task.id}`}>

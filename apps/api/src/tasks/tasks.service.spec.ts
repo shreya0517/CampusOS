@@ -4,6 +4,7 @@ import { REQUIRED_ROLES } from '../authorization/authorization.decorator';
 import { TasksController } from './tasks.controller';
 import type { DatabaseService } from '../database.service';
 import type { EventsService } from '../events/events.service';
+import type { NotificationsService } from '../notifications/notifications.service';
 import type { AuthorizationContext } from '../authorization/authorization.types';
 import { TaskPriority, TaskStatus } from '@prisma/client';
 
@@ -33,6 +34,9 @@ type MockDb = {
     findFirst: jest.Mock;
   };
   user: {
+    findFirst: jest.Mock;
+  };
+  department: {
     findFirst: jest.Mock;
   };
 };
@@ -88,6 +92,10 @@ describe('TasksService WebSocket Event Emissions', () => {
       user: {
         findFirst: jest.fn().mockResolvedValue({ facultyProfiles: [{ departmentId: 'dept-1' }] }),
       },
+      // Departments belong to the college unless a test says otherwise.
+      department: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'dept-1' }),
+      },
     };
 
     mockDatabase.$transaction.mockImplementation((work: (tx: MockDb) => Promise<unknown>) => work(mockDatabase));
@@ -137,7 +145,7 @@ describe('TasksService WebSocket Event Emissions', () => {
       title: 'Prepare Syllabus',
       description: 'Annual syllabus review',
       priority: TaskPriority.HIGH,
-      deadline: new Date('2026-12-01'),
+      deadline: new Date(Date.now() + 7 * 86_400_000),
       departmentId: 'dept-1',
     };
 
@@ -398,6 +406,84 @@ describe('TasksService WebSocket Event Emissions', () => {
       mockDatabase.task.update.mockResolvedValue({ id: 'task-100', title: 'Grade finals', departmentId: 'dept-1' });
       await service.updateTask('task-100', { title: 'Grade finals' }, adminContext);
       expect(mockEventsService.emitTaskUpdated).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'task-100' }), 'college-1', 'dept-1', ['faculty-1', 'faculty-2']);
+    });
+  });
+
+  describe('deadlines, departments and who hears about a submission', () => {
+    const day = 86_400_000;
+    const hodContext: AuthorizationContext = { userId: 'hod-1', collegeId: 'college-1', roles: ['HOD'], permissions: [], departmentId: 'dept-1' };
+    let notifications: { safely: jest.Mock; hodsOf: jest.Mock; notify: jest.Mock };
+    let notifyingService: TasksService;
+
+    beforeEach(() => {
+      notifications = { safely: jest.fn(), hodsOf: jest.fn().mockResolvedValue(['hod-1']), notify: jest.fn() };
+      notifications.safely.mockImplementation((work: (n: typeof notifications) => Promise<void>) => work(notifications));
+      notifyingService = new TasksService(
+        mockDatabase as unknown as DatabaseService,
+        mockEventsService as unknown as EventsService,
+        notifications as unknown as NotificationsService,
+      );
+    });
+
+    it('refuses a new task whose deadline has passed', async () => {
+      await expect(service.createTask({ title: 'Late', priority: TaskPriority.LOW, deadline: new Date(Date.now() - day) }, adminContext)).rejects.toMatchObject({ response: { code: 'DEADLINE_IN_PAST' } });
+      expect(mockDatabase.task.create).not.toHaveBeenCalled();
+    });
+
+    it("refuses a department that isn't one of the college's", async () => {
+      mockDatabase.department.findFirst.mockResolvedValueOnce(null);
+      await expect(
+        service.createTask({ title: 'Audit', priority: TaskPriority.LOW, deadline: new Date(Date.now() + day), departmentId: 'other-college-dept' }, adminContext),
+      ).rejects.toMatchObject({ response: { code: 'DEPARTMENT_NOT_FOUND' } });
+      expect(mockDatabase.department.findFirst).toHaveBeenCalledWith({ where: { id: 'other-college-dept', collegeId: 'college-1' }, select: { id: true } });
+      expect(mockDatabase.task.create).not.toHaveBeenCalled();
+
+      mockDatabase.task.findFirst.mockResolvedValue({ id: 'task-100', departmentId: 'dept-1', deadline: new Date(Date.now() + day), assignments: [] });
+      mockDatabase.department.findFirst.mockResolvedValueOnce(null);
+      await expect(service.updateTask('task-100', { departmentId: 'other-college-dept' }, adminContext)).rejects.toMatchObject({ response: { code: 'DEPARTMENT_NOT_FOUND' } });
+      expect(mockDatabase.task.update).not.toHaveBeenCalled();
+    });
+
+    it('lets an overdue task be edited, but not moved to a deadline that has passed', async () => {
+      const past = new Date(Date.now() - 3 * day);
+      mockDatabase.task.findFirst.mockResolvedValue({ id: 'task-100', departmentId: 'dept-1', deadline: past, assignments: [] });
+      mockDatabase.task.update.mockResolvedValue({ id: 'task-100', title: 'Renamed', departmentId: 'dept-1' });
+
+      // The form sends the deadline back unchanged.
+      await service.updateTask('task-100', { title: 'Renamed', deadline: new Date(past) }, adminContext);
+      expect(mockDatabase.task.update).toHaveBeenCalledTimes(1);
+
+      await expect(service.updateTask('task-100', { deadline: new Date(Date.now() - day) }, adminContext)).rejects.toMatchObject({ response: { code: 'DEADLINE_IN_PAST' } });
+      expect(mockDatabase.task.update).toHaveBeenCalledTimes(1);
+    });
+
+    it("tells the task's creator and its department's HODs about a submission, but not the submitter", async () => {
+      mockDatabase.taskAssignment.findFirst.mockResolvedValue({
+        id: 'assign-1',
+        status: TaskStatus.IN_PROGRESS,
+        taskId: 'task-100',
+        task: { id: 'task-100', title: 'Grade midterms', departmentId: 'dept-1', createdByUserId: 'admin-1' },
+      });
+
+      await notifyingService.submitTask('assign-1', { content: 'Done' }, facultyContext);
+      expect(notifications.hodsOf).toHaveBeenCalledWith('college-1', 'dept-1');
+      expect(notifications.notify).toHaveBeenCalledWith('college-1', ['admin-1', 'hod-1'], expect.objectContaining({ title: 'Task submitted for review: Grade midterms' }));
+
+      // An HOD submitting their own work isn't told about it.
+      await notifyingService.submitTask('assign-1', { content: 'Done' }, hodContext);
+      expect(notifications.notify).toHaveBeenLastCalledWith('college-1', ['admin-1'], expect.anything());
+    });
+
+    it('says a task is overdue when it is assigned after its deadline', async () => {
+      mockDatabase.taskAssignment.create.mockResolvedValue({ id: 'assignment-1' });
+
+      mockDatabase.task.findFirst.mockResolvedValue({ id: 'task-100', title: 'Old task', departmentId: 'dept-1', deadline: new Date('2026-01-10T10:00:00Z') });
+      await notifyingService.assignTask('task-100', { assigneeUserId: 'faculty-1' }, adminContext);
+      expect(notifications.notify).toHaveBeenLastCalledWith('college-1', ['faculty-1'], expect.objectContaining({ body: 'Overdue since 10 Jan 2026.' }));
+
+      mockDatabase.task.findFirst.mockResolvedValue({ id: 'task-101', title: 'New task', departmentId: 'dept-1', deadline: new Date(Date.now() + 2 * day) });
+      await notifyingService.assignTask('task-101', { assigneeUserId: 'faculty-2' }, adminContext);
+      expect(notifications.notify).toHaveBeenLastCalledWith('college-1', ['faculty-2'], expect.objectContaining({ body: expect.stringMatching(/^Due /) }));
     });
   });
 });

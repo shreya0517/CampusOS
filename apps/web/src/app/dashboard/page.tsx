@@ -31,6 +31,7 @@ import { getInstitutionOverview, type InstitutionOverview } from '@/lib/overview
 import { AttendanceBar } from '@/components/attendance/attendance-bar';
 import { useTaskEvents, TASK_EVENTS } from '@/lib/use-socket';
 import { NavIcon } from '@/lib/navigation';
+import { TaskDeadline } from '@/components/tasks/task-deadline';
 
 type Tone = 'blue' | 'emerald' | 'violet' | 'amber' | 'rose' | 'sky';
 type QuickStat = { label: string; value: string | number; sub?: string; href?: string; icon?: string; tone?: Tone };
@@ -615,7 +616,7 @@ function HodDashboard() {
                   <div>
                     <p className="text-sm font-medium">{a.task?.title ?? 'Untitled Task'}</p>
                     <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                      Deadline: {a.task?.deadline ? new Date(a.task.deadline).toLocaleDateString('en-IN') : '—'}
+                      Deadline: {a.task?.deadline ? <TaskDeadline deadline={a.task.deadline} status={a.status} /> : '—'}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -694,7 +695,7 @@ function HodDashboard() {
                   <div>
                     <p className="text-sm font-medium">{t.title}</p>
                     <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                      Deadline: {new Date(t.deadline).toLocaleDateString('en-IN')}
+                      Deadline: <TaskDeadline deadline={t.deadline} status={t.status} />
                     </p>
                   </div>
                   <Link href={`/dashboard/tasks/${t.id}`}>
@@ -972,7 +973,7 @@ function FacultyDashboard() {
                       <div>
                         <p className="font-semibold text-sm">{a.task?.title ?? 'Untitled Task'}</p>
                         <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                          Deadline: {a.task?.deadline ? new Date(a.task.deadline).toLocaleDateString('en-IN') : '—'}
+                          Deadline: {a.task?.deadline ? <TaskDeadline deadline={a.task.deadline} status={a.status} /> : '—'}
                         </p>
                       </div>
                       <div className="flex gap-1.5 shrink-0">

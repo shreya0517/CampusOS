@@ -3,6 +3,9 @@ import { authenticatedRequest } from './api-client';
 export type TaskStatus = 'PENDING' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED' | 'REWORK';
 export type TaskPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 
+/** Past the deadline and not approved: the same rule as the overdue counts on the dashboards. */
+export const isOverdue = (deadline: string, status: TaskStatus): boolean => status !== 'APPROVED' && new Date(deadline).getTime() < Date.now();
+
 export type Task = {
   id: string;
   collegeId: string;

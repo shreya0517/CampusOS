@@ -38,6 +38,7 @@ export default function NewTaskPage() {
     const e: Partial<typeof form> = {};
     if (!form.title.trim()) e.title = 'Title is required.';
     if (!form.deadline) e.deadline = 'Deadline is required.';
+    else if (new Date(form.deadline).getTime() < Date.now()) e.deadline = 'Deadline must be in the future.';
     return e;
   };
 

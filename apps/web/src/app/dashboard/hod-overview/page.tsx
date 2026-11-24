@@ -10,6 +10,7 @@ import { Table, TableCell, TableHead } from '@/components/ui/table';
 import { listFaculty, type Faculty } from '@/lib/faculty-api';
 import { listTasks, listMyAssignments, type Task, type TaskAssignment } from '@/lib/tasks-api';
 import { listVisitors, reviewVisitor, type Visitor } from '@/lib/visitors-api';
+import { TaskDeadline } from '@/components/tasks/task-deadline';
 
 // ─── Badge helpers ─────────────────────────────────────────────────────────────
 const PRIORITY_BADGE: Record<string, string> = {
@@ -287,7 +288,7 @@ export default function HodOverviewPage() {
                         <Badge value={a.status} map={TASK_STATUS_BADGE} />
                       </TableCell>
                       <TableCell>
-                        {a.task?.deadline ? new Date(a.task.deadline).toLocaleDateString('en-IN') : '—'}
+                        {a.task?.deadline ? <TaskDeadline deadline={a.task.deadline} status={a.status} /> : '—'}
                       </TableCell>
                       <TableCell>
                         <Link href={`/dashboard/tasks/${a.taskId}`}>
@@ -346,7 +347,7 @@ export default function HodOverviewPage() {
                       <TableCell>
                         <Badge value={t.priority} map={PRIORITY_BADGE} />
                       </TableCell>
-                      <TableCell>{new Date(t.deadline).toLocaleDateString('en-IN')}</TableCell>
+                      <TableCell><TaskDeadline deadline={t.deadline} status={t.status} /></TableCell>
                       <TableCell>
                         <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-purple-100 text-xs font-bold text-purple-700">
                           {submittedAssignments.length}
@@ -420,7 +421,7 @@ export default function HodOverviewPage() {
                     <TableCell>
                       <Badge value={t.status} map={TASK_STATUS_BADGE} />
                     </TableCell>
-                    <TableCell>{new Date(t.deadline).toLocaleDateString('en-IN')}</TableCell>
+                    <TableCell><TaskDeadline deadline={t.deadline} status={t.status} /></TableCell>
                     <TableCell>{t.assignments.length}</TableCell>
                     <TableCell>
                       <Link href={`/dashboard/tasks/${t.id}`}>

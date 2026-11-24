@@ -14,6 +14,7 @@ import {
   type Task, type TaskStatus,
 } from '@/lib/tasks-api';
 import { listFaculty, type Faculty } from '@/lib/faculty-api';
+import { TaskDeadline } from '@/components/tasks/task-deadline';
 import { useTaskEvents, TASK_EVENTS } from '@/lib/use-socket';
 
 const PRIORITY_BADGE: Record<string, string> = {
@@ -214,7 +215,7 @@ export default function TaskDetailPage() {
             {task.description && <p className="text-[hsl(var(--muted-foreground))]">{task.description}</p>}
             <div className="grid grid-cols-2 gap-1">
               <span className="font-medium">Deadline</span>
-              <span>{new Date(task.deadline).toLocaleString('en-IN')}</span>
+              <span><TaskDeadline deadline={task.deadline} status={myAssignment?.status ?? task.status} withTime /></span>
               <span className="font-medium">Department</span>
               <span>{task.department?.name ?? 'All'}</span>
               <span className="font-medium">Created by</span>
